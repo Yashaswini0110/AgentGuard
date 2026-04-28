@@ -2,7 +2,7 @@
 
 **Project:** Unisys Innovation Program 2026  
 **Team:** [Your team name]  
-**Start Date:** [Fill this in]  
+**Start Date:** April 28, 2026  
 **Target Demo Date:** [Fill this in]
 
 ---
@@ -11,7 +11,7 @@
 
 | Step | Feature | Status | Date Completed | Notes |
 |---|---|---|---|---|
-| 0 | Project Setup | ⬜ TODO | - | - |
+| 0 | Project Setup | ✅ DONE | 2026-04-28 | Initial structure and requirements created. |
 | 1 | Worker Agent | ⬜ TODO | - | - |
 | 2 | Policy Engine (Layer 1) | ⬜ TODO | - | - |
 | 3 | Risk Router (Layer 2) | ⬜ TODO | - | - |
@@ -77,10 +77,15 @@
 
 ## Daily Standup Log
 
-### [Date — fill in]
+### 2026-04-28
 **Done today:**  
+- Initialized requirements.txt with 2026 stable versions.
+- Created project folder structure and placeholder files.
+- Created .env.example template.
+- Updated progress.md for Step 0.
 **Working on next:**  
-**Blocked by:**  
+- Step 1: Worker Agent implementation.
+**Blocked by:** None. 
 
 ---
 
