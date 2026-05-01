@@ -12,7 +12,7 @@
 | Step | Feature | Status | Date Completed | Notes |
 |---|---|---|---|---|
 | 0 | Project Setup | ✅ DONE | 2026-04-28 | Initial structure and requirements created. |
-| 1 | Worker Agent | ⬜ TODO | - | - |
+| 1 | Worker Agent | ✅ DONE | 2026-05-01 | Shifted from OpenAI to Gemini API |
 | 2 | Policy Engine (Layer 1) | ⬜ TODO | - | - |
 | 3 | Risk Router (Layer 2) | ⬜ TODO | - | - |
 | 4 | Artifact Engine | ⬜ TODO | - | - |
