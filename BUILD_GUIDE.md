@@ -755,6 +755,51 @@ Update `progress.md`: `## Step 8 — Streamlit Dashboard ✅ DONE`
 
 ---
 
+## STEP 8A — Resume Parsing Agent
+
+**Model: Gemini 3 Flash**
+
+### 1. Goal
+Convert PDF resume into structured JSON for AgentGuard pipeline.
+
+### 2. Tech Stack
+- PyMuPDF or pdfplumber for text extraction
+- Gemini 3 Flash for parsing
+
+### 3. Prompt Template for LLM
+
+"Extract the following structured hiring features from this resume:
+- years_of_experience
+- primary_skills
+- inferred skill_match_score (0–1)
+- education level
+- possible proxies (institution, location, surname)
+
+Return ONLY JSON."
+
+### 4. Example Output JSON
+```json
+{
+  "candidate_id": "CAND-PDF-9921",
+  "name": "Arjun Mehta",
+  "years_of_experience": 4.5,
+  "skill_match_score": 0.88,
+  "interview_score": 0.0,
+  "assessment_score": 0.0,
+  "applicant_surname": "Mehta",
+  "institution_tier": 1,
+  "home_district": "Mumbai"
+}
+```
+
+### 5. Integration
+Call this before /decision API to pre-populate the form.
+
+### 6. Error Handling
+If parsing fails → fallback to manual mode.
+
+---
+
 ## STEP 9 — Docker Setup
 
 **Model: Gemini 3 Flash**

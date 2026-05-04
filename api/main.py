@@ -105,9 +105,15 @@ class CandidateInput(BaseModel):
     skill_match_score: float = Field(..., ge=0.0, le=1.0, json_schema_extra={"example": 0.87})
     interview_score: float = Field(..., ge=0.0, json_schema_extra={"example": 78.5})
     assessment_score: float = Field(..., ge=0.0, json_schema_extra={"example": 82.0})
-    career_gap_months: int = Field(..., ge=0, json_schema_extra={"example": 0})
-    gender: str = Field(..., json_schema_extra={"example": "F"})
-    institution_tier: int = Field(..., ge=1, le=5, json_schema_extra={"example": 2})
+    
+    # Bias-related / Prohibited fields (Optional)
+    career_gap_months: Optional[int] = Field(None, ge=0)
+    gender: Optional[str] = Field(None)
+    institution_tier: Optional[int] = Field(None, ge=1, le=5)
+    applicant_surname: Optional[str] = Field(None)
+    home_district: Optional[str] = Field(None)
+    village_code: Optional[str] = Field(None)
+    emotion_score: Optional[float] = Field(None, ge=0.0, le=1.0)
 
 
 class HumanReviewInput(BaseModel):

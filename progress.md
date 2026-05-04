@@ -19,7 +19,8 @@
 | 5 | ServiceNow Integration | ✅ DONE | 2026-05-04 | Real/Mock integration with 5s timeout and automatic .env fallback. |
 | 6 | Supervisor LLM | ✅ DONE | 2026-05-04 | Semantic review using Gemini 2.5 Flash for YELLOW decisions. |
 | 7 | FastAPI Backend | ✅ DONE | 2026-05-04 | Full pipeline gateway (api/main.py) with 6 endpoints. Integrated all core layers. 30/30 pytest tests passing (tests/test_api.py) with 0 warnings. |
-| 8 | Streamlit Dashboard | ⬜ TODO | - | - |
+| 8 | Streamlit Dashboard + Resume Upload (IN PROGRESS) | 🔄 IN PROGRESS | 2026-05-04 | Core UI and backend health checks implemented. |
+| 8A | Resume Parsing Integration | 🔄 IN PROGRESS | 2026-05-04 | LLM-based feature extraction from PDF resumes. |
 | 9 | Docker Setup | ⬜ TODO | - | - |
 | 10 | Demo Cases (A/B/C) | ⬜ TODO | - | - |
 
@@ -74,13 +75,12 @@
 - [x] GET /drift returns alert field
 - [x] All 30/30 pytest tests pass (0 warnings)
 
-### Dashboard (Step 8)
-- [ ] Case A shows GREEN banner
-- [ ] Case B shows YELLOW banner  
-- [ ] Case C shows RED banner + ServiceNow ticket ID
-- [ ] SHAP bar chart renders correctly
-- [ ] Artifact downloads as valid JSON
-- [ ] Drift monitor shows correct percentages
+### Resume Integration (Step 8A)
+- [ ] Resume upload UI implemented
+- [ ] LLM-based feature extraction added
+- [ ] JSON aligned with CandidateInput schema
+- [ ] Upload valid resume → GREEN decision
+- [ ] Upload biased resume → RED decision
 
 ---
 
