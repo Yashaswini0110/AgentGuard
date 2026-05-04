@@ -13,7 +13,7 @@
 |---|---|---|---|---|
 | 0 | Project Setup | ✅ DONE | 2026-04-28 | Initial structure and requirements created. |
 | 1 | Worker Agent | ✅ DONE | 2026-05-01 | Shifted from OpenAI to Gemini API |
-| 2 | Policy Engine (Layer 1) | ⬜ TODO | - | - |
+| 2 | Policy Engine (Layer 1) | ✅ DONE | 2026-05-04 | Deterministic 6-rule engine (core/policy_engine.py): covers EU AI Act Art.5(1)(f), India Constitution Art.15, DPDP Act 2023, Maternity Benefit Act 1961, and prompt-injection detection. Full pytest suite (tests/test_policy_engine.py) — 16/16 tests passing. |
 | 3 | Risk Router (Layer 2) | ⬜ TODO | - | - |
 | 4 | Artifact Engine | ⬜ TODO | - | - |
 | 5 | ServiceNow Integration | ⬜ TODO | - | - |
