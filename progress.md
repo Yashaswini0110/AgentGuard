@@ -17,7 +17,7 @@
 | 3 | Risk Router (Layer 2) | ✅ DONE | 2026-05-04 | GradientBoostingClassifier (3-class: GREEN/YELLOW/RED). Composite 6-feature risk scoring with 10% label noise — test accuracy 73.8%, CV 75.4% ± 1.4%. SHAP via PermutationExplainer. Drift detection with RED>20% alert. 29/29 pytest tests passing. |
 | 4 | Artifact Engine | ✅ DONE | 2026-05-04 | Cryptographically signed, tamper-proof JSON artifact engine (core/artifact_engine.py). Includes generate, save, verify, and regulator-export functions. 8/8 pytest tests passing (tests/test_artifacts.py). |
 | 5 | ServiceNow Integration | ✅ DONE | 2026-05-04 | Real/Mock integration with 5s timeout and automatic .env fallback. |
-| 6 | Supervisor LLM | ⬜ TODO | - | - |
+| 6 | Supervisor LLM | ✅ DONE | 2026-05-04 | Semantic review using Gemini 2.5 Flash for YELLOW decisions. |
 | 7 | FastAPI Backend | ⬜ TODO | - | - |
 | 8 | Streamlit Dashboard | ⬜ TODO | - | - |
 | 9 | Docker Setup | ⬜ TODO | - | - |
@@ -60,6 +60,13 @@
 - [x] Connection error handled (returns status=ERROR)
 - [x] 6/6 pytest tests pass (tests/test_servicenow.py)
 
+### Supervisor LLM (Step 6)
+- [x] returns all 6 required fields
+- [x] supervisor_verdict is one of APPROVE/REJECT/ESCALATE_TO_HUMAN
+- [x] handles Gemini API exceptions (escalates to human)
+- [x] detects bias in features (e.g. socioeconomic_background)
+- [x] 4/4 pytest tests pass (tests/test_supervisor.py)
+
 ### FastAPI (Step 7)
 - [ ] GET /health returns 200
 - [ ] POST /decision runs full pipeline end-to-end
@@ -88,11 +95,11 @@
 ### 2026-05-04
 - Built `core/artifact_engine.py` — cryptographically signed compliance artifact engine (Parts A–D).
 - Implemented `tests/test_artifacts.py` — verified hash-based tamper detection and field completeness (8/8 passing).
-- Built `core/servicenow.py` — Real/Mock ServiceNow incident integration with 5s timeout (Parts A–D).
-- Implemented `tests/test_servicenow.py` — verified mock, timeout, and connection error handling (6/6 passing).
+- Built `core/supervisor.py` — Supervisor LLM semantic review for borderline (YELLOW) decisions using Gemini 2.5 Flash.
+- Implemented `tests/test_supervisor.py` — verified bias detection and error handling (4/4 passing).
 
 **Working on next:**
-- Step 6: Supervisor LLM (`core/supervisor.py`).
+- Step 7: FastAPI Backend.
 
 **Blocked by:** None.
 
@@ -127,7 +134,7 @@
 | GREEN routing % on clean data | > 85% | 51% recall (noisy labels by design) |
 | Policy engine latency | < 5ms | < 1ms |
 | Risk Router test accuracy | > 70% | 73.8% hold-out / 75.4% CV |
-| All pytest tests passing | 100% | 59/59: 8/8 (artifacts) · 29/29 (router) · 16/16 (policy) · 6/6 (servicenow) |
+| All pytest tests passing | 100% | 63/63: 8/8 (artifacts) · 29/29 (router) · 16/16 (policy) · 6/6 (servicenow) · 4/4 (supervisor) |
 
 ---
 
