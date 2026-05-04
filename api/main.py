@@ -34,6 +34,10 @@ from pydantic import BaseModel, Field
 # ---------------------------------------------------------------------------
 # Core pipeline imports
 # ---------------------------------------------------------------------------
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 from core.worker_agent import make_hiring_decision
 from core.policy_engine import check_policy
 from core.risk_router import classify_risk, check_drift

@@ -5,6 +5,11 @@ import plotly.express as px
 import time
 import json
 import uuid
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from core.resume_parser import extract_text_from_pdf, parse_resume
 
 # Configuration
 BASE_URL = "http://127.0.0.1:8000"
@@ -15,6 +20,8 @@ if "last_result" not in st.session_state:
     st.session_state.last_result = None
 if "refresh_counter" not in st.session_state:
     st.session_state.refresh_counter = 0
+if "parsed_data" not in st.session_state:
+    st.session_state.parsed_data = {}
 
 # --- Helper Functions ---
 
@@ -67,54 +74,98 @@ col3.metric("RED %", f"{drift.get('red_pct', 0):.1f}%", delta=None, delta_color=
 
 st.divider()
 
-# --- SECTION 2: Submit a Candidate ---
-st.header("👤 Submit a Candidate")
+# --- SECTION 2: Job-Aware Candidate Ingestion ---
+st.header("👤 Job-Aware Candidate Ingestion")
 
-if not is_healthy:
-    st.warning("⚠️ Backend connection is down. Candidate submission is disabled.")
+input_mode = st.radio("Select Input Mode", ["Manual Input", "Resume Upload (PDF)"], horizontal=True)
 
+if input_mode == "Resume Upload (PDF)":
+    # Predefined Job Descriptions
+    PREDEFINED_JDS = {
+        "Software Engineer": "Role: Software Engineer. Requirements: Python, APIs, Data Structures, System Design.",
+        "Data Scientist": "Role: Data Scientist. Requirements: Python, ML, Pandas, Statistics.",
+        "Frontend Developer": "Role: Frontend Developer. Requirements: React, JS, UI/UX."
+    }
+
+    # Job Description Input
+    jd_option = st.selectbox("Select Target Role", ["Custom"] + list(PREDEFINED_JDS.keys()))
+    if jd_option == "Custom":
+        jd_text = st.text_area("Job Description", placeholder="Paste the JD here...", height=150)
+    else:
+        jd_text = PREDEFINED_JDS[jd_option]
+        st.info(f"**JD Summary:** {jd_text}")
+    
+    uploaded_file = st.file_uploader("Upload Candidate Resume", type=["pdf"])
+    
+    if uploaded_file is not None:
+        if st.button("Evaluate Candidate with Gemini"):
+            if not jd_text:
+                st.warning("Please provide a Job Description first.")
+            else:
+                with st.spinner("Analyzing resume against JD..."):
+                    try:
+                        pdf_bytes = uploaded_file.read()
+                        text = extract_text_from_pdf(pdf_bytes)
+                        if not text.strip():
+                            st.error("No text could be extracted from this PDF.")
+                        else:
+                            parsed = parse_resume(text, jd_text)
+                            st.session_state.parsed_data = parsed
+                            st.success("Evaluation complete! Review the derived data below.")
+                    except Exception as e:
+                        st.error(f"Evaluation failed: {e}")
+
+st.markdown("### 📋 Candidate Data Review")
 with st.form("candidate_form"):
+    d = st.session_state.parsed_data
+    
+    # Display Score & Reasoning if available
+    if d.get("skill_match_score") is not None:
+        c_score, c_reason = st.columns([1, 2])
+        c_score.metric("Skill Match Score", f"{d.get('skill_match_score', 0):.2f}")
+        c_reason.info(f"**AI Reasoning:** {d.get('match_reasoning', 'N/A')}")
+        
+        if d.get("missing_skills"):
+            st.markdown(f"**Missing Skills Detected:** {', '.join(d.get('missing_skills'))}")
+
     c1, c2 = st.columns(2)
     with c1:
-        st.subheader("Core Information")
-        name = st.text_input("Candidate Name", placeholder="John Doe")
-        candidate_id = st.text_input("Candidate ID", value=f"CAND-{uuid.uuid4().hex[:6].upper()}")
-        experience = st.slider("Years of Experience", 0.0, 20.0, 5.0)
-        skill_score = st.slider("Skill Match Score", 0.0, 1.0, 0.75, step=0.01)
+        name = st.text_input("Candidate Name", value=d.get("name", "John Doe"))
+        candidate_id = st.text_input("Candidate ID", value=d.get("candidate_id", f"CAND-{uuid.uuid4().hex[:6].upper()}"))
+        experience = st.slider("Years of Experience", 0.0, 20.0, float(d.get("years_of_experience", 5.0)))
+        skill_score = st.slider("Override Skill Match Score", 0.0, 1.0, float(d.get("skill_match_score", 0.75)), step=0.01)
         
     with c2:
-        st.subheader("Assessment Data")
-        interview_score = st.slider("Interview Score", 0.0, 10.0, 7.0, step=0.1)
-        assessment_score = st.slider("Assessment Score", 0.0, 100.0, 75.0)
+        interview_score = st.slider("Interview Score", 0.0, 10.0, float(d.get("interview_score", 7.0)), step=0.1)
+        assessment_score = st.slider("Assessment Score", 0.0, 100.0, float(d.get("assessment_score", 75.0)))
         
-        # New optional bias-related fields
-        st.markdown("---")
         with st.expander("Additional Metadata (Optional)"):
-            gender = st.selectbox("Gender", [None, "M", "F", "Other"], index=0)
-            career_gap = st.number_input("Career Gap (Months)", min_value=0, value=0)
-            tier = st.selectbox("Institution Tier", [None, 1, 2, 3, 4, 5], index=0)
+            gender = st.selectbox("Gender", [None, "M", "F", "Other"], index=0 if d.get("gender") is None else ["M", "F", "Other"].index(d.get("gender")) + 1 if d.get("gender") in ["M", "F", "Other"] else 0)
+            career_gap = st.number_input("Career Gap (Months)", min_value=0, value=int(d.get("career_gap_months", 0)))
+            tier = st.selectbox("Institution Tier", [None, 1, 2, 3, 4, 5], index=d.get("institution_tier", 0) if d.get("institution_tier") in [1,2,3,4,5] else 0)
 
     st.markdown("---")
-    simulate_bias = st.toggle("🛡️ Simulate Biased AI", value=False, help="Inject prohibited fields to test policy engine")
+    simulate_bias = st.toggle("🛡️ Simulate Biased AI", value=False)
     
     biased_payload = {}
-    if simulate_bias:
+    has_proxies = d.get("applicant_surname") or d.get("home_district") or d.get("institution_tier")
+    if simulate_bias or has_proxies:
         b1, b2 = st.columns(2)
         with b1:
-            surname = st.text_input("Applicant Surname", placeholder="Sharma (Proxy for Caste)")
-            home_dist = st.text_input("Home District", placeholder="Gadchiroli (Proxy for Tribal ID)")
+            surname = st.text_input("Applicant Surname", value=d.get("applicant_surname", ""))
+            home_dist = st.text_input("Home District", value=d.get("home_district", ""))
         with b2:
-            emotion = st.slider("Emotion Score", 0.0, 1.0, 0.45, help="Prohibited by EU AI Act")
-            village = st.text_input("Village Code", placeholder="V-441207")
+            emotion = st.slider("Emotion Score", 0.0, 1.0, float(d.get("emotion_score", 0.45)))
+            village = st.text_input("Village Code", value=d.get("village_code", ""))
         
         biased_payload = {
-            "applicant_surname": surname if surname else "Sharma",
-            "home_district": home_dist if home_dist else "Gadchiroli",
+            "applicant_surname": surname if surname else None,
+            "home_district": home_dist if home_dist else None,
             "emotion_score": emotion,
-            "village_code": village if village else "V-123"
+            "village_code": village if village else None
         }
 
-    submit = st.form_submit_button("Run AgentGuard Pipeline", disabled=not is_healthy)
+    submit = st.form_submit_button("Submit to Governance Pipeline", disabled=not is_healthy)
 
 if submit:
     if not name:
@@ -132,24 +183,18 @@ if submit:
             "institution_tier": tier,
             **biased_payload
         }
-        
-        # Remove None values as requested
         payload = remove_none_values(payload)
-        
-        with st.spinner("Processing through governance layers..."):
+        with st.spinner("Processing..."):
             try:
-                resp = requests.post(f"{BASE_URL}/decision", json=payload, timeout=10)
+                resp = requests.post(f"{BASE_URL}/decision", json=payload, timeout=15)
                 if resp.status_code == 200:
                     st.session_state.last_result = resp.json()
                     st.success("Analysis Complete")
-                elif resp.status_code == 422:
-                    st.error(f"Validation Error: {resp.json().get('detail')}")
+                    st.session_state.parsed_data = {}
                 else:
-                    st.error(f"Backend Error ({resp.status_code}): {resp.text}")
-            except requests.exceptions.ConnectionError:
-                st.error("Connection Failed: Backend is unreachable. Ensure the FastAPI server is running at http://127.0.0.1:8000")
+                    st.error(f"Backend Error: {resp.text}")
             except Exception as e:
-                st.error(f"An unexpected error occurred: {e}")
+                st.error(f"Error: {e}")
 
 # --- SECTION 3: Decision Result Display ---
 if st.session_state.last_result:
@@ -193,8 +238,8 @@ if st.session_state.last_result:
             """, unsafe_allow_html=True)
             
         st.markdown("---")
-        st.write("**Artifact Integrity Hash:**")
         artifact = res.get("artifact", {})
+        st.write("**Artifact Integrity Hash:**")
         st.code(artifact.get("artifact_hash", "N/A"))
         
         json_data = json.dumps(res, indent=2)
@@ -225,7 +270,6 @@ def fetch_history():
     try:
         response = requests.get(f"{BASE_URL}/decisions", timeout=5)
         if response.status_code == 200:
-            # The backend returns {"count": X, "artifacts": [...]}
             data = response.json()
             return data.get("artifacts", [])
     except:
@@ -234,7 +278,6 @@ def fetch_history():
 
 history_files = fetch_history()
 if history_files:
-    # Just list the artifact names for now as a simple history
     st.write(f"Found {len(history_files)} recent decision artifacts.")
     st.write(history_files[:10])
 else:
