@@ -18,7 +18,7 @@
 | 4 | Artifact Engine | ✅ DONE | 2026-05-04 | Cryptographically signed, tamper-proof JSON artifact engine (core/artifact_engine.py). Includes generate, save, verify, and regulator-export functions. 8/8 pytest tests passing (tests/test_artifacts.py). |
 | 5 | ServiceNow Integration | ✅ DONE | 2026-05-04 | Real/Mock integration with 5s timeout and automatic .env fallback. |
 | 6 | Supervisor LLM | ✅ DONE | 2026-05-04 | Semantic review using Gemini 2.5 Flash for YELLOW decisions. |
-| 7 | FastAPI Backend | ⬜ TODO | - | - |
+| 7 | FastAPI Backend | ✅ DONE | 2026-05-04 | Full pipeline gateway (api/main.py) with 6 endpoints. Integrated all core layers. 30/30 pytest tests passing (tests/test_api.py) with 0 warnings. |
 | 8 | Streamlit Dashboard | ⬜ TODO | - | - |
 | 9 | Docker Setup | ⬜ TODO | - | - |
 | 10 | Demo Cases (A/B/C) | ⬜ TODO | - | - |
@@ -68,11 +68,11 @@
 - [x] 4/4 pytest tests pass (tests/test_supervisor.py)
 
 ### FastAPI (Step 7)
-- [ ] GET /health returns 200
-- [ ] POST /decision runs full pipeline end-to-end
-- [ ] Artifact saved to disk after every decision
-- [ ] GET /drift returns alert field
-- [ ] All pytest tests pass
+- [x] GET /health returns 200
+- [x] POST /decision runs full pipeline end-to-end
+- [x] Artifact saved to disk after every decision
+- [x] GET /drift returns alert field
+- [x] All 30/30 pytest tests pass (0 warnings)
 
 ### Dashboard (Step 8)
 - [ ] Case A shows GREEN banner
@@ -97,9 +97,11 @@
 - Implemented `tests/test_artifacts.py` — verified hash-based tamper detection and field completeness (8/8 passing).
 - Built `core/supervisor.py` — Supervisor LLM semantic review for borderline (YELLOW) decisions using Gemini 2.5 Flash.
 - Implemented `tests/test_supervisor.py` — verified bias detection and error handling (4/4 passing).
+- Built `api/main.py` — full FastAPI gateway wiring all 6 governance layers together.
+- Implemented `tests/test_api.py` — end-to-end pipeline verification (30/30 passing with 0 warnings).
 
 **Working on next:**
-- Step 7: FastAPI Backend.
+- Step 8: Streamlit Dashboard.
 
 **Blocked by:** None.
 
@@ -134,7 +136,7 @@
 | GREEN routing % on clean data | > 85% | 51% recall (noisy labels by design) |
 | Policy engine latency | < 5ms | < 1ms |
 | Risk Router test accuracy | > 70% | 73.8% hold-out / 75.4% CV |
-| All pytest tests passing | 100% | 63/63: 8/8 (artifacts) · 29/29 (router) · 16/16 (policy) · 6/6 (servicenow) · 4/4 (supervisor) |
+| All pytest tests passing | 100% | 93/93: 8/8 (artifacts) · 29/29 (router) · 16/16 (policy) · 6/6 (servicenow) · 4/4 (supervisor) · 30/30 (api) |
 
 ---
 
