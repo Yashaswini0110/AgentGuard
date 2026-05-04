@@ -15,7 +15,7 @@
 | 1 | Worker Agent | ✅ DONE | 2026-05-01 | Shifted from OpenAI to Gemini API |
 | 2 | Policy Engine (Layer 1) | ✅ DONE | 2026-05-04 | Deterministic 6-rule engine (core/policy_engine.py): covers EU AI Act Art.5(1)(f), India Constitution Art.15, DPDP Act 2023, Maternity Benefit Act 1961, and prompt-injection detection. Full pytest suite (tests/test_policy_engine.py) — 16/16 tests passing. |
 | 3 | Risk Router (Layer 2) | ✅ DONE | 2026-05-04 | GradientBoostingClassifier (3-class: GREEN/YELLOW/RED). Composite 6-feature risk scoring with 10% label noise — test accuracy 73.8%, CV 75.4% ± 1.4%. SHAP via PermutationExplainer. Drift detection with RED>20% alert. 29/29 pytest tests passing. |
-| 4 | Artifact Engine | ⬜ TODO | - | - |
+| 4 | Artifact Engine | ✅ DONE | 2026-05-04 | Cryptographically signed, tamper-proof JSON artifact engine (core/artifact_engine.py). Includes generate, save, verify, and regulator-export functions. 8/8 pytest tests passing (tests/test_artifacts.py). |
 | 5 | ServiceNow Integration | ⬜ TODO | - | - |
 | 6 | Supervisor LLM | ⬜ TODO | - | - |
 | 7 | FastAPI Backend | ⬜ TODO | - | - |
@@ -45,6 +45,14 @@
 - [x] SHAP scores returned for all 6 features
 - [x] Drift detection alerts when RED > 20%
 - [x] 29/29 pytest tests pass
+
+### Artifact Engine (Step 4)
+- [x] generate_artifact returns all 16 required fields
+- [x] artifact_hash starts with "sha256:"
+- [x] verify_artifact returns True for unmodified, False for tampered
+- [x] RED routing includes ServiceNow ticket ID
+- [x] Regulatory export includes EU AI Act / India DPDP headers
+- [x] 8/8 pytest tests passing
 
 ### ServiceNow (Step 5)
 - [ ] Mock returns valid INC ticket ID
@@ -78,16 +86,12 @@
 ## Daily Standup Log
 
 ### 2026-05-04
-**Done today:**
-- Built `core/risk_router.py` — Layer 2 ML risk router (Parts A–D).
-- Created `data/generate_synthetic_dataset.py` — 5,000-row synthetic HR dataset with composite 6-feature scoring, Gaussian boundary noise, and 10% label flips to prevent trivial overfitting.
-- Debugged and fixed 4 issues: empty CSV, `shap.TreeExplainer` multi-class incompatibility, sklearn feature-name warning, and PermutationExplainer 18s cold-start latency.
-- Regularised GradientBoostingClassifier: `max_depth=3`, `min_samples_leaf=20`, `min_samples_split=40` — accuracy dropped from 100% (overfit) to 73.8% test / 75.4% CV.
-- Added SHAP explainer cache (`_EXPLAINER_CACHE`) + conftest warm-up so latency tests pass reliably.
-- All 29/29 pytest tests passing in `tests/test_router.py`.
+- Built `core/artifact_engine.py` — cryptographically signed compliance artifact engine (Parts A–D).
+- Implemented `tests/test_artifacts.py` — verified hash-based tamper detection and field completeness.
+- All 8/8 pytest tests passing.
 
 **Working on next:**
-- Step 4: Artifact Engine (`core/artifact_engine.py`).
+- Step 5: ServiceNow Integration (`core/servicenow_client.py`).
 
 **Blocked by:** None.
 
@@ -122,7 +126,7 @@
 | GREEN routing % on clean data | > 85% | 51% recall (noisy labels by design) |
 | Policy engine latency | < 5ms | < 1ms |
 | Risk Router test accuracy | > 70% | 73.8% hold-out / 75.4% CV |
-| All pytest tests passing | 100% | 29/29 (router) · 16/16 (policy) |
+| All pytest tests passing | 100% | 8/8 (artifacts) · 29/29 (router) · 16/16 (policy) |
 
 ---
 
@@ -134,7 +138,7 @@
 - [ ] Case A runs cleanly (GREEN)
 - [ ] Case B runs cleanly (YELLOW)
 - [ ] Case C creates real ServiceNow ticket live
-- [ ] Artifact hash tamper test demonstrated
+- [x] Artifact hash tamper test demonstrated
 - [ ] Team has rehearsed full 8-minute demo 5+ times
 - [ ] 30-second backup video recorded (ServiceNow fallback)
 - [ ] Everyone can answer: "How is this different from Purview?"
