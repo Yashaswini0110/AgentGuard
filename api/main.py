@@ -18,10 +18,13 @@ POST   /human-review/{decision_id} Record a human APPROVE / REJECT action.
 GET    /artifacts/recent           Recent saved artifacts (full JSON).
 POST   /escalate/{decision_id}     HR escalation to tech review.
 POST   /tech-review/{decision_id} Tech reviewer ACCEPT / REJECT.
+POST   /batch_rank                 Bulk ZIP ingest + parallel governance + merit rank.
+POST   /batch_rank/stream          Same workflow with SSE progress events.
 """
 
 from __future__ import annotations
 
+import asyncio
 import datetime
 import json
 import logging
@@ -32,7 +35,7 @@ from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
 import time as _agent_time
 from pathlib import Path as _AgentPath
@@ -44,13 +47,11 @@ import sys
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from core.worker_agent import make_hiring_decision
-from core.policy_engine import check_policy
-from core.risk_router import classify_risk, check_drift
-from core.supervisor import semantic_review
-from core.servicenow import create_incident_with_fallback
-from core.artifact_engine import generate_artifact, save_artifact, export_for_regulator
+from core.risk_router import check_drift
+from core.sync_pipeline import sync_governance_pipeline
+from core.artifact_engine import export_for_regulator
 from core.resume_parser import extract_text_from_pdf, parse_resume
+from core.batch_ranking import execute_batch_zip_ranking_async
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -187,6 +188,17 @@ def _write_artifact_file(artifact: dict) -> None:
         json.dump(artifact, fh, indent=2, sort_keys=True)
 
 
+def _clear_bulk_review_pending(artifact: dict) -> None:
+    """After HR or tech action, stop surfacing GREEN bulk profiles solely for intake ack."""
+    wc = artifact.get("workflow_context")
+    if not isinstance(wc, dict) or not wc.get("bulk_review_pending"):
+        return
+    cleared = dict(wc)
+    cleared["bulk_review_pending"] = False
+    cleared["bulk_hr_cleared_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    artifact["workflow_context"] = cleared
+
+
 # ---------------------------------------------------------------------------
 # Endpoint 1: POST /decision — full governance pipeline
 # ---------------------------------------------------------------------------
@@ -203,145 +215,108 @@ async def run_decision(candidate_input: CandidateInput):
     5. **servicenow** → incident ticket (RED only)
     6. **artifact_engine** → signed compliance artifact
     """
-    pipeline_start = time.perf_counter()
-
     candidate: dict = candidate_input.model_dump()
-
-    # ── Step 1: Worker agent ────────────────────────────────────────────────
     try:
-        decision: dict = make_hiring_decision(candidate)
+        payload = sync_governance_pipeline(candidate)
     except Exception as exc:
-        logger.error("worker_agent failed: %s", exc)
-        raise HTTPException(status_code=502, detail=f"Worker agent error: {exc}")
-
-    # Enrich decision with candidate_name for artifact
-    decision.setdefault("candidate_name", candidate.get("name"))
-
-    # ── Step 2: Policy engine ───────────────────────────────────────────────
-    try:
-        policy_result: dict = check_policy(decision, raw_input=str(candidate))
-    except Exception as exc:
-        logger.error("policy_engine failed: %s", exc)
-        raise HTTPException(status_code=502, detail=f"Policy engine error: {exc}")
-
-    policy_blocked: bool = policy_result.get("recommended_action") == "BLOCK"
-
-    # ── Step 3: Risk router (only when policy passes) ───────────────────────
-    router_result: dict = {}
-    classification: str = "RED"  # default if policy blocked
-
-    if not policy_blocked:
-        # Build the feature dict that classify_risk expects
-        router_input: dict = {
-            "years_of_experience": candidate.get("years_of_experience", 0),
-            "skill_match_score":   candidate.get("skill_match_score", 0.0),
-            "interview_score":     candidate.get("interview_score", 0.0),
-            "assessment_score":    candidate.get("assessment_score", 0.0),
-            "decision_confidence": decision.get("confidence", 0.5),
-            "feature_count":       len(decision.get("features_used", [])),
-        }
-        try:
-            router_result = classify_risk(router_input)
-            classification = router_result.get("risk_level", "RED")
-        except Exception as exc:
-            logger.error("risk_router failed: %s", exc)
-            # Treat as RED on error
-            router_result = {
-                "risk_level": "RED",
-                "confidence_score": 0.0,
-                "shap_scores": {},
-                "model_version_hash": "unknown",
-                "latency_ms": 0.0,
-                "error": str(exc),
-            }
-            classification = "RED"
-
-    # Normalise router_result keys for downstream consumers
-    # (artifact_engine reads routing_classification, confidence_score, shap_scores)
-    normalised_router: dict = {
-        "routing_classification": router_result.get("risk_level", classification),
-        "confidence_score":       router_result.get("confidence_score", 0.0),
-        "shap_scores":            router_result.get("shap_scores", {}),
-        "model_version_hash":     router_result.get("model_version_hash", "unknown"),
-    }
-    if policy_blocked:
-        normalised_router["routing_classification"] = "RED"
-
-    # ── Step 4: Supervisor semantic review (YELLOW only) ────────────────────
-    supervisor_result: Optional[dict] = None
-    if classification == "YELLOW":
-        try:
-            supervisor_result = semantic_review(decision, router_result)
-        except Exception as exc:
-            logger.error("supervisor failed: %s", exc)
-            supervisor_result = {
-                "supervisor_verdict": "ESCALATE_TO_HUMAN",
-                "bias_detected": True,
-                "bias_reason": f"Supervisor unavailable: {exc}",
-                "confidence": 0.0,
-                "features_flagged": [],
-            }
-
-    # ── Step 5: ServiceNow incident (RED path) ──────────────────────────────
-    servicenow_result: Optional[dict] = None
-    ticket_id: Optional[str] = None
-
-    is_red = classification == "RED" or policy_blocked
-    if is_red:
-        try:
-            servicenow_result = create_incident_with_fallback(
-                decision,
-                policy_result,
-                normalised_router,
-            )
-            ticket_id = servicenow_result.get("ticket_id")
-        except Exception as exc:
-            logger.error("servicenow failed: %s", exc)
-            servicenow_result = {
-                "ticket_id": None,
-                "status": "ERROR",
-                "url": None,
-                "error": str(exc),
-            }
-
-    # ── Step 6: Artifact engine ─────────────────────────────────────────────
-    try:
-        artifact: dict = generate_artifact(
-            decision=decision,
-            policy_result=policy_result,
-            router_result=normalised_router,
-            servicenow_ticket_id=ticket_id,
-            supervisor_result=supervisor_result,
-        )
-        artifact_path: str = save_artifact(artifact)
-    except Exception as exc:
-        logger.error("artifact_engine failed: %s", exc)
-        raise HTTPException(status_code=500, detail=f"Artifact engine error: {exc}")
-
-    # ── Total latency ────────────────────────────────────────────────────────
-    total_latency_ms: float = round((time.perf_counter() - pipeline_start) * 1000, 2)
+        logger.error("Governance pipeline failed: %s", exc)
+        raise HTTPException(status_code=502, detail=f"Governance pipeline error: {exc}")
 
     logger.info(
         "Pipeline complete | decision_id=%s | classification=%s | latency=%.1fms",
-        artifact["decision_id"],
-        classification,
-        total_latency_ms,
+        payload["decision_id"],
+        payload["classification"],
+        payload["total_latency_ms"],
     )
 
-    # ── Response ─────────────────────────────────────────────────────────────
     return {
-        "decision_id":       artifact["decision_id"],
-        "classification":    classification,
-        "policy_blocked":    policy_blocked,
-        "decision":          decision,
-        "policy_result":     policy_result,
-        "router_result":     router_result,
-        "supervisor_result": supervisor_result,
-        "servicenow_result": servicenow_result,
-        "artifact":          artifact,
-        "artifact_path":     artifact_path,
-        "total_latency_ms":  total_latency_ms,
+        "decision_id": payload["decision_id"],
+        "classification": payload["classification"],
+        "policy_blocked": payload["policy_blocked"],
+        "decision": payload["decision"],
+        "policy_result": payload["policy_result"],
+        "router_result": payload["router_result"],
+        "supervisor_result": payload["supervisor_result"],
+        "servicenow_result": payload["servicenow_result"],
+        "artifact": payload["artifact"],
+        "artifact_path": payload["artifact_path"],
+        "total_latency_ms": payload["total_latency_ms"],
     }
+
+
+@app.post("/batch_rank", summary="Bulk resumes (ZIP), parallel governance, merit-ranked shortlist")
+async def batch_rank(
+    file: UploadFile = File(...),
+    job_description: str = Form(...),
+    open_positions: int = Form(..., ge=1, le=5000),
+):
+    """
+    ZIP must contain PDF and/or DOCX resumes. Ranking is deliberately independent of
+    intra-archive ordering; ingestion order is randomized from a deterministic PRNG seed.
+    """
+    ctype = (file.content_type or "").lower()
+    if "zip" not in ctype and not (file.filename or "").lower().endswith(".zip"):
+        raise HTTPException(status_code=415, detail="Only application/zip uploads are accepted.")
+    try:
+        blob = await file.read()
+        if len(blob) > 80 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="ZIP larger than 80MB is not accepted.")
+        return await execute_batch_zip_ranking_async(blob, job_description=job_description, open_positions=int(open_positions))
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error("batch_rank failed: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Batch ranking failed: {exc}")
+
+
+@app.post("/batch_rank/stream", summary="Same as /batch_rank with SSE progress framing")
+async def batch_rank_stream(
+    file: UploadFile = File(...),
+    job_description: str = Form(...),
+    open_positions: int = Form(..., ge=1, le=5000),
+):
+    ctype = (file.content_type or "").lower()
+    if "zip" not in ctype and not (file.filename or "").lower().endswith(".zip"):
+        raise HTTPException(status_code=415, detail="Only application/zip uploads are accepted.")
+
+    blob = await file.read()
+    if len(blob) > 80 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="ZIP larger than 80MB is not accepted.")
+
+    sentinel = object()
+    queue: asyncio.Queue = asyncio.Queue()
+
+    async def publish(ev: dict) -> None:
+        await queue.put(ev)
+
+    async def runner():
+        try:
+            result = await execute_batch_zip_ranking_async(
+                blob,
+                job_description=job_description,
+                open_positions=int(open_positions),
+                progress=publish,
+            )
+            await queue.put({"type": "result", "payload": result})
+        except Exception as exc:
+            await queue.put({"type": "error", "message": str(exc)})
+        finally:
+            await queue.put(sentinel)
+
+    async def event_iter():
+        task = asyncio.create_task(runner())
+        try:
+            while True:
+                item = await queue.get()
+                if item is sentinel:
+                    break
+                yield f"data: {json.dumps(item, default=str)}\n\n".encode("utf-8")
+        finally:
+            await task
+
+    return StreamingResponse(event_iter(), media_type="text/event-stream")
 
 
 # ---------------------------------------------------------------------------
@@ -350,8 +325,15 @@ async def run_decision(candidate_input: CandidateInput):
 
 @app.get("/health", summary="Liveness probe")
 async def health():
-    """Returns service status and API version."""
-    return {"status": "ok", "version": "3.1"}
+    """Returns service status, version, and capability flags for the *running* process."""
+    route_paths = {getattr(r, "path", "") for r in app.routes}
+    return {
+        "status": "ok",
+        "version": "3.1",
+        # Absolute path of the loaded module — if this is not your repo, the wrong process bound the port.
+        "api_module_file": str(Path(__file__).resolve()),
+        "batch_rank_available": "/batch_rank" in route_paths and "/batch_rank/stream" in route_paths,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -450,10 +432,10 @@ async def resume_parse(
 async def artifacts_recent(limit: int = 50):
     """
     Returns full artifact documents for the most recently modified JSON files,
-    newest first (bounded by ``limit``, max 200).
+    newest first (bounded by ``limit``, max 500).
     """
     ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
-    cap = max(1, min(limit, 200))
+    cap = max(1, min(limit, 500))
     files = sorted(
         ARTIFACTS_DIR.glob("*.json"),
         key=lambda p: p.stat().st_mtime,
@@ -523,6 +505,7 @@ async def human_review(decision_id: str, body: HumanReviewInput):
         "reason":      body.reason,
         "reviewed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }
+    _clear_bulk_review_pending(artifact)
 
     _write_artifact_file(artifact)
     logger.info(
@@ -544,6 +527,7 @@ async def escalate_to_tech(decision_id: str, body: EscalateInput):
         "note": body.note,
         "escalated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }
+    _clear_bulk_review_pending(artifact)
     _write_artifact_file(artifact)
     logger.info("Escalation recorded | decision_id=%s | reviewer=%s", decision_id, body.reviewer_id)
     return {"message": "Escalation recorded.", "artifact": artifact}
@@ -559,6 +543,7 @@ async def tech_review(decision_id: str, body: TechReviewInput):
         "note": body.note,
         "reviewed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }
+    _clear_bulk_review_pending(artifact)
     _write_artifact_file(artifact)
     logger.info(
         "Tech review recorded | decision_id=%s | action=%s | reviewer=%s",

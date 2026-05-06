@@ -55,7 +55,19 @@ POLICY_RULES: dict[str, dict] = {
         "reason": "Malicious instruction injection detected in candidate input",
         # Condition: raw_input contains any injection pattern (case-insensitive)
     },
+    "QUOTA_EXHAUSTION_WITHOUT_POOL_REVIEW": {
+        "severity": "YELLOW",
+        "regulation": "AgentGuard Pool-First Governance Policy v1.0",
+        "reason": (
+            "Sufficient merit-ranked candidates exist to fill all open roles before the "
+            "minimum share of the applicant pool completed governance processing — freeze final approvals"
+        ),
+    },
 }
+
+
+# Minimum share of the pool that must complete governance review before finalize.
+MIN_POOL_REVIEW_THRESHOLD: float = 0.80
 
 # Injection patterns for Rule 6 (lowercased for case-insensitive matching)
 _INJECTION_PATTERNS: tuple[str, ...] = (
@@ -135,6 +147,48 @@ def check_policy(decision: dict, raw_input: str = "") -> dict:
         "passed": passed,
         "violations": violations,
         "recommended_action": "PROCEED" if passed else "BLOCK",
+    }
+
+
+def evaluate_pool_quota_rule(
+    *,
+    open_positions: int,
+    pool_total: int,
+    governance_completed: int,
+    can_fill_all_openings: bool,
+) -> dict:
+    """
+    Pool-first governance latch: freeze final approvals when openings could be fully
+    covered before enough of the pool has cleared governance processing.
+
+    Returns a dict suitable for attaching to bulk-rank API responses (not merged into per-candidate policy).
+    """
+    rule_meta = POLICY_RULES["QUOTA_EXHAUSTION_WITHOUT_POOL_REVIEW"]
+    if pool_total <= 0:
+        reviewed_pct = 1.0
+    else:
+        reviewed_pct = float(max(0.0, min(1.0, governance_completed / pool_total)))
+
+    triggered = (
+        open_positions > 0
+        and can_fill_all_openings
+        and reviewed_pct < MIN_POOL_REVIEW_THRESHOLD
+    )
+
+    violation_body = {
+        "rule_name": "QUOTA_EXHAUSTION_WITHOUT_POOL_REVIEW",
+        "severity": rule_meta["severity"],
+        "regulation": rule_meta["regulation"],
+        "reason": rule_meta["reason"],
+    }
+
+    return {
+        "triggered": triggered,
+        "freeze_final_approvals": triggered,
+        "tentative_hold": triggered,
+        "reviewed_pool_percentage": round(reviewed_pct, 4),
+        "min_pool_review_threshold": MIN_POOL_REVIEW_THRESHOLD,
+        "violations": [violation_body] if triggered else [],
     }
 
 

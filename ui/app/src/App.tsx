@@ -5,6 +5,7 @@ import ReviewQueuePage from './pages/ReviewQueuePage'
 import TechReviewPage from './pages/TechReviewPage'
 import ShortlistPage from './pages/ShortlistPage'
 import RunDecisionPage from './pages/RunDecisionPage'
+import BulkRankPage from './pages/BulkRankPage'
 
 export default function App() {
   return (
@@ -12,6 +13,7 @@ export default function App() {
       <Route path="/" element={<LandingPage />} />
       <Route path="/dashboard" element={<DashboardPage />} />
       <Route path="/run" element={<RunDecisionPage />} />
+      <Route path="/bulk-rank" element={<BulkRankPage />} />
       <Route path="/review" element={<ReviewQueuePage />} />
       <Route path="/tech-review" element={<TechReviewPage />} />
       <Route path="/shortlist" element={<ShortlistPage />} />

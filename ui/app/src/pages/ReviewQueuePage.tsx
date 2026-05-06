@@ -1,4 +1,5 @@
-import { Fragment, useCallback, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router'
 import AppShell from '@/components/AppShell'
 import { StatusDot } from '@/components/StatusDot'
 import { apiBase, fetchRecentArtifacts, postEscalate, postHumanReview } from '@/lib/api'
@@ -61,11 +62,12 @@ function mapArtifact(a: AgentGuardArtifact): ReviewRow | null {
     TECH_RESOLVED: 'TECH_RESOLVED',
   }
 
+  const bulk = a.workflow_context?.ingestion_source === 'bulk_zip_rank'
   return {
     id: a.decision_id,
     artifact: a,
     candidate: a.candidate_name ?? a.candidate_id ?? 'Unknown',
-    role: 'Applicant',
+    role: bulk ? 'Bulk ZIP pool' : 'Applicant',
     status: statusMap[st] ?? 'UNDER REVIEW',
     violation: violationLabel(a),
     shapFeature: top.feature,
@@ -162,6 +164,10 @@ function statusToDot(status: ReviewStatus): { color: 'green' | 'amber' | 'red' |
 }
 
 export default function ReviewQueuePage() {
+  const [searchParams] = useSearchParams()
+  const highlightDecision = searchParams.get('decision')
+  const sessionFilter = searchParams.get('session')
+
   const [rows, setRows] = useState<ReviewRow[]>([])
   const [loadErr, setLoadErr] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -176,7 +182,7 @@ export default function ReviewQueuePage() {
   const reload = useCallback(async () => {
     setLoadErr(null)
     try {
-      const arts = await fetchRecentArtifacts(120)
+      const arts = await fetchRecentArtifacts(420)
       setRows(
         arts
           .map(mapArtifact)
@@ -191,7 +197,12 @@ export default function ReviewQueuePage() {
     void reload()
   }, [reload])
 
-  const filteredRows = rows.filter((r) => {
+  const scopeRows = useMemo(() => {
+    if (!sessionFilter) return rows
+    return rows.filter((r) => r.artifact.workflow_context?.bulk_session_id === sessionFilter)
+  }, [rows, sessionFilter])
+
+  const filteredRows = scopeRows.filter((r) => {
     if (activeTab === 'all') return true
     if (activeTab === 'blocked') return r.status === 'BLOCKED'
     if (activeTab === 'review')
@@ -200,9 +211,9 @@ export default function ReviewQueuePage() {
   })
 
   const counts = {
-    all: rows.length,
-    blocked: rows.filter((r) => r.status === 'BLOCKED').length,
-    review: rows.filter((r) => r.status === 'UNDER REVIEW' || r.status === 'ESCALATED').length,
+    all: scopeRows.length,
+    blocked: scopeRows.filter((r) => r.status === 'BLOCKED').length,
+    review: scopeRows.filter((r) => r.status === 'UNDER REVIEW' || r.status === 'ESCALATED').length,
   }
 
   const isDone = (s: ReviewStatus) =>
@@ -248,9 +259,20 @@ export default function ReviewQueuePage() {
             Review Queue
           </h1>
           <p className="font-sans text-sm mt-1" style={{ color: '#6B6B6B' }}>
-            Hydrated from <span className="font-mono text-xs">{apiBase()}</span>/artifacts/recent · Actions call
-            live REST endpoints
+            Hydrated from <span className="font-mono text-xs">{apiBase()}</span>/artifacts/recent · Shows policy
+            BLOCK, RED, YELLOW, and bulk ZIP candidates until HR records review, escalation, or tech clearance. Standard
+            single-candidate GREEN runs still skip this queue.
           </p>
+          {sessionFilter ? (
+            <p className="font-sans text-xs mt-2 font-mono" style={{ color: '#0D6EFD' }}>
+              Filtered to bulk session {shortHash(sessionFilter, 8, 6)}
+            </p>
+          ) : null}
+          {highlightDecision ? (
+            <p className="font-sans text-xs mt-2 font-mono" style={{ color: '#0D6EFD' }}>
+              Deep-linked to decision {shortHash(highlightDecision, 8, 4)}
+            </p>
+          ) : null}
           {loadErr && (
             <p className="font-sans text-xs mt-2" style={{ color: '#B91C1C' }}>
               {loadErr}{' '}
@@ -323,7 +345,9 @@ export default function ReviewQueuePage() {
             {filteredRows.length === 0 && (
               <tr>
                 <td colSpan={6} className="px-5 py-8 text-center font-sans text-sm" style={{ color: '#9B9B9B' }}>
-                  No review items. RED / YELLOW / policy BLOCK decisions appear here automatically after pipeline runs.
+                  No review items. RED / YELLOW / policy BLOCK decisions appear here automatically after{' '}
+                  <span className="font-semibold">Run pipeline</span> or{' '}
+                  <span className="font-semibold">Bulk rank</span> batches.
                 </td>
               </tr>
             )}
@@ -336,7 +360,15 @@ export default function ReviewQueuePage() {
               return (
                 <Fragment key={row.id}>
                   <tr
-                    style={{ borderTop: '1px solid #E4E2DC', cursor: 'pointer' }}
+                    data-decision-id={row.decisionId}
+                    style={{
+                      borderTop: '1px solid #E4E2DC',
+                      cursor: 'pointer',
+                      outline:
+                        highlightDecision === row.decisionId ? '2px solid rgba(13,110,253,0.45)' : undefined,
+                      backgroundColor:
+                        highlightDecision === row.decisionId ? 'rgba(13,110,253,0.06)' : undefined,
+                    }}
                     onClick={() => {
                       if (!actionState) setExpandedId(expanded ? null : row.id)
                     }}

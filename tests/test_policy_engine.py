@@ -11,7 +11,7 @@ import os
 # Ensure the project root is on sys.path so the core package is importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from core.policy_engine import check_policy
+from core.policy_engine import MIN_POOL_REVIEW_THRESHOLD, check_policy, evaluate_pool_quota_rule
 
 
 # ---------------------------------------------------------------------------
@@ -242,3 +242,34 @@ def test_empty_features_used_with_clean_input_passes():
     assert result["passed"] is True
     assert result["violations"] == []
     assert result["recommended_action"] == "PROCEED"
+
+
+def test_quota_pool_review_rule_metadata_is_distinct_severity():
+    """Pool quota rule is organisational (YELLOW) and excluded from per-feature checks."""
+    from core.policy_engine import POLICY_RULES
+
+    assert POLICY_RULES["QUOTA_EXHAUSTION_WITHOUT_POOL_REVIEW"]["severity"] == "YELLOW"
+
+
+def test_quota_evaluator_triggers_below_threshold():
+    result = evaluate_pool_quota_rule(
+        open_positions=5,
+        pool_total=100,
+        governance_completed=79,
+        can_fill_all_openings=True,
+    )
+    assert result["triggered"] is True
+    assert result["freeze_final_approvals"] is True
+    assert MIN_POOL_REVIEW_THRESHOLD == 0.80
+    assert len(result["violations"]) == 1
+
+
+def test_quota_evaluator_passes_at_threshold():
+    result = evaluate_pool_quota_rule(
+        open_positions=5,
+        pool_total=100,
+        governance_completed=80,
+        can_fill_all_openings=True,
+    )
+    assert result["triggered"] is False
+    assert result["violations"] == []

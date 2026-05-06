@@ -21,6 +21,7 @@ def generate_artifact(
     router_result: dict,
     servicenow_ticket_id: str = None,
     supervisor_result: dict | None = None,
+    workflow_context: dict | None = None,
 ) -> dict:
     """
     Build and return a cryptographically signed compliance artifact dict.
@@ -77,6 +78,9 @@ def generate_artifact(
 
     if supervisor_result is not None:
         artifact_body["supervisor_review"] = supervisor_result
+
+    if workflow_context:
+        artifact_body["workflow_context"] = dict(workflow_context)
 
     # ------------------------------------------------------------------ #
     # Compute SHA-256 over the sorted, deterministic JSON representation  #

@@ -4,6 +4,7 @@ import { Shield } from 'lucide-react'
 const navLinks = [
   { to: '/dashboard', label: 'Dashboard' },
   { to: '/run', label: 'Run pipeline' },
+  { to: '/bulk-rank', label: 'Bulk rank' },
   { to: '/review', label: 'Review Queue' },
   { to: '/tech-review', label: 'Tech Review' },
   { to: '/shortlist', label: 'Shortlist & Email' },

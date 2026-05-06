@@ -32,6 +32,17 @@ export interface AgentGuardArtifact {
     note: string
     reviewed_at?: string
   }
+  workflow_context?: {
+    ingestion_source?: string
+    bulk_review_pending?: boolean
+    bulk_session_id?: string
+    bulk_job_fingerprint?: string
+    open_positions_requested?: number
+    bulk_hr_cleared_at?: string
+    bulk_processing_failure?: boolean
+    bulk_failure_phase?: string
+    bulk_failure_detail?: string
+  }
 }
 
 export interface DriftReport {
@@ -67,4 +78,45 @@ export interface CandidatePayload {
   home_district?: string | null
   village_code?: string | null
   emotion_score?: number | null
+}
+
+export interface BatchRankCandidateRow {
+  rank: number
+  candidate_name: string
+  candidate_id?: string | null
+  composite_score?: number
+  classification?: string
+  governance_status?: string
+  policy_rule?: string | null
+  score_breakdown?: Record<string, number>
+  top_skills?: string[]
+  experience_summary?: string
+  reasoning?: string
+  artifact_reference?: {
+    decision_id?: string | null
+    artifact_path?: string | null
+    routing_classification?: string | null
+    bulk_session_id?: string | null
+  }
+}
+
+export interface BatchRankResponse {
+  job_role: string
+  bulk_session_id?: string
+  total_candidates?: number
+  successful_ingestion?: number
+  open_positions?: number
+  processing_time_ms?: number
+  job_description_digest?: string
+  pool_quota_policy?: {
+    triggered?: boolean
+    freeze_final_approvals?: boolean
+    tentative_hold?: boolean
+    reviewed_pool_percentage?: number
+    min_pool_review_threshold?: number
+    violations?: Array<Record<string, unknown>>
+  }
+  ranked_candidates: BatchRankCandidateRow[]
+  skipped_files?: Array<{ file: string; reason: string }>
+  [key: string]: unknown
 }

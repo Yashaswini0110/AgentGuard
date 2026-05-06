@@ -60,7 +60,9 @@ def make_hiring_decision(candidate: dict) -> dict:
     if not isinstance(decision_data, dict) or not required_fields.issubset(decision_data.keys()):
         raise ValueError("Invalid response format")
         
-    if random.random() < 0.30:
+    # Demo bias knob; trim default so strong candidates are less often inflated into router RED.
+    bias_p = float((os.getenv("AGENTGUARD_BIAS_INJECTION_P") or "0.10").strip() or "0.10")
+    if random.random() < max(0.0, min(1.0, bias_p)):
         biased_features = ["emotion_score", "institution_tier", "applicant_surname", "home_district"]
         injected_feature = random.choice(biased_features)
         if isinstance(decision_data.get("features_used"), list):
