@@ -20,6 +20,7 @@ def generate_artifact(
     policy_result: dict,
     router_result: dict,
     servicenow_ticket_id: str = None,
+    supervisor_result: dict | None = None,
 ) -> dict:
     """
     Build and return a cryptographically signed compliance artifact dict.
@@ -30,6 +31,7 @@ def generate_artifact(
     policy_result       : Output from the policy engine (Layer 1).
     router_result       : Output from the risk router (Layer 2).
     servicenow_ticket_id: ServiceNow ticket ID string, or None.
+    supervisor_result   : Optional semantic review dict (YELLOW path).
 
     Returns
     -------
@@ -37,6 +39,20 @@ def generate_artifact(
     """
     violations: list = policy_result.get("violations", []) or []
     first_violation: dict = violations[0] if violations else {}
+
+    # Derive PASS | BLOCK from Layer 1 outcome (check_policy uses recommended_action / passed).
+    if policy_result.get("recommended_action") == "BLOCK":
+        policy_flag = "BLOCK"
+    elif policy_result.get("recommended_action") == "PROCEED":
+        policy_flag = "PASS"
+    elif policy_result.get("result") == "BLOCK":
+        policy_flag = "BLOCK"
+    elif policy_result.get("result") == "PASS":
+        policy_flag = "PASS"
+    elif policy_result.get("passed") is False:
+        policy_flag = "BLOCK"
+    else:
+        policy_flag = "PASS"
 
     # ------------------------------------------------------------------ #
     # Build the artifact WITHOUT the hash field first                      #
@@ -46,8 +62,8 @@ def generate_artifact(
         "timestamp":               datetime.now(timezone.utc).isoformat(),
         "candidate_id":            decision.get("candidate_id"),
         "candidate_name":          decision.get("candidate_name"),
-        "decision_outcome":        decision.get("decision_outcome"),         # APPROVE | REJECT
-        "policy_result":           policy_result.get("result", "PASS"),      # PASS | BLOCK
+        "decision_outcome":        decision.get("decision_outcome") or decision.get("decision"),
+        "policy_result":           policy_flag,
         "policy_violations":       violations,
         "policy_rule_cited":       first_violation.get("rule_name", "NONE") if first_violation else "NONE",
         "regulation_reference":    first_violation.get("regulation", "N/A") if first_violation else "N/A",
@@ -58,6 +74,9 @@ def generate_artifact(
         "model_version_hash":      router_result.get("model_version_hash"),
         "servicenow_ticket_id":    servicenow_ticket_id,
     }
+
+    if supervisor_result is not None:
+        artifact_body["supervisor_review"] = supervisor_result
 
     # ------------------------------------------------------------------ #
     # Compute SHA-256 over the sorted, deterministic JSON representation  #

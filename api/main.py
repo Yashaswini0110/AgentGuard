@@ -15,10 +15,14 @@ GET    /decisions                 List all saved artifact filenames.
 GET    /decisions/{decision_id}   Fetch a single artifact by ID.
 GET    /drift                     Drift report from the last 100 artifacts.
 POST   /human-review/{decision_id} Record a human APPROVE / REJECT action.
+GET    /artifacts/recent           Recent saved artifacts (full JSON).
+POST   /escalate/{decision_id}     HR escalation to tech review.
+POST   /tech-review/{decision_id} Tech reviewer ACCEPT / REJECT.
 """
 
 from __future__ import annotations
 
+import datetime
 import json
 import logging
 import os
@@ -35,7 +39,7 @@ from pydantic import BaseModel, Field
 # Core pipeline imports
 # ---------------------------------------------------------------------------
 import sys
-import os
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from core.worker_agent import make_hiring_decision
@@ -124,6 +128,17 @@ class HumanReviewInput(BaseModel):
     action: str = Field(..., pattern="^(APPROVE|REJECT)$", json_schema_extra={"example": "APPROVE"})
     reviewer_id: str = Field(..., json_schema_extra={"example": "HR-OFFICER-42"})
     reason: str = Field(..., json_schema_extra={"example": "Reviewed all evidence; decision is fair."})
+
+
+class EscalateInput(BaseModel):
+    reviewer_id: str = Field(..., json_schema_extra={"example": "HR-OFFICER-42"})
+    note: str = Field("", json_schema_extra={"example": "Needs technical assessment on skills."})
+
+
+class TechReviewInput(BaseModel):
+    action: str = Field(..., pattern="^(ACCEPT|REJECT)$", json_schema_extra={"example": "ACCEPT"})
+    reviewer_id: str = Field(..., json_schema_extra={"example": "TECH-LEAD-01"})
+    note: str = Field("", json_schema_extra={"example": "Validated against job description."})
 
 
 # ---------------------------------------------------------------------------
@@ -274,6 +289,7 @@ async def run_decision(candidate_input: CandidateInput):
             policy_result=policy_result,
             router_result=normalised_router,
             servicenow_ticket_id=ticket_id,
+            supervisor_result=supervisor_result,
         )
         artifact_path: str = save_artifact(artifact)
     except Exception as exc:
@@ -345,6 +361,29 @@ async def get_decision(decision_id: str):
     return artifact
 
 
+@app.get("/artifacts/recent", summary="Load recent artifacts in one round-trip")
+async def artifacts_recent(limit: int = 50):
+    """
+    Returns full artifact documents for the most recently modified JSON files,
+    newest first (bounded by ``limit``, max 200).
+    """
+    ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+    cap = max(1, min(limit, 200))
+    files = sorted(
+        ARTIFACTS_DIR.glob("*.json"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )[:cap]
+    artifacts: list[dict] = []
+    for fp in files:
+        try:
+            with open(fp, encoding="utf-8") as fh:
+                artifacts.append(json.load(fh))
+        except Exception:
+            pass
+    return {"count": len(artifacts), "artifacts": artifacts}
+
+
 # ---------------------------------------------------------------------------
 # Endpoint 5: GET /drift — distribution / drift report
 # ---------------------------------------------------------------------------
@@ -393,7 +432,6 @@ async def human_review(decision_id: str, body: HumanReviewInput):
     """
     artifact = _load_artifact(decision_id)
 
-    import datetime
     artifact["human_review"] = {
         "action":      body.action,
         "reviewer_id": body.reviewer_id,
@@ -410,6 +448,40 @@ async def human_review(decision_id: str, body: HumanReviewInput):
     )
 
     return {"message": "Human review recorded.", "artifact": artifact}
+
+
+@app.post("/escalate/{decision_id}", summary="HR escalation to technical review")
+async def escalate_to_tech(decision_id: str, body: EscalateInput):
+    """Record an HR escalation note on the artifact (for the Tech Review queue)."""
+    artifact = _load_artifact(decision_id)
+    artifact["escalation"] = {
+        "reviewer_id": body.reviewer_id,
+        "note": body.note,
+        "escalated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }
+    _write_artifact_file(artifact)
+    logger.info("Escalation recorded | decision_id=%s | reviewer=%s", decision_id, body.reviewer_id)
+    return {"message": "Escalation recorded.", "artifact": artifact}
+
+
+@app.post("/tech-review/{decision_id}", summary="Technical reviewer ACCEPT / REJECT")
+async def tech_review(decision_id: str, body: TechReviewInput):
+    """Persist technical review outcome on the artifact (for shortlist workflow)."""
+    artifact = _load_artifact(decision_id)
+    artifact["tech_review"] = {
+        "decision": body.action,
+        "reviewer_id": body.reviewer_id,
+        "note": body.note,
+        "reviewed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }
+    _write_artifact_file(artifact)
+    logger.info(
+        "Tech review recorded | decision_id=%s | action=%s | reviewer=%s",
+        decision_id,
+        body.action,
+        body.reviewer_id,
+    )
+    return {"message": "Tech review recorded.", "artifact": artifact}
 
 
 # ---------------------------------------------------------------------------
