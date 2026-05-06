@@ -34,6 +34,8 @@ from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
+import time as _agent_time
+from pathlib import Path as _AgentPath
 
 # ---------------------------------------------------------------------------
 # Core pipeline imports
@@ -146,6 +148,25 @@ class TechReviewInput(BaseModel):
 # Artifact directory helper
 # ---------------------------------------------------------------------------
 ARTIFACTS_DIR = Path("artifacts")
+_AGENT_LOG_PATH = str(_AgentPath(__file__).resolve().parents[1] / "debug-924df7.log")
+
+# #region agent log
+# Create a single boot log line to prove logging works (no secrets).
+try:
+    payload = {
+        "sessionId": "924df7",
+        "runId": "pre-fix",
+        "hypothesisId": "H0",
+        "location": "api/main.py:module_init",
+        "message": "API module imported",
+        "data": {"cwd": os.getcwd(), "log_path": _AGENT_LOG_PATH},
+        "timestamp": int(_agent_time.time() * 1000),
+    }
+    with open(_AGENT_LOG_PATH, "a", encoding="utf-8") as f:
+        f.write(json.dumps(payload) + "\n")
+except Exception:
+    pass
+# #endregion
 
 
 def _artifact_path(decision_id: str) -> Path:
@@ -383,6 +404,34 @@ async def resume_parse(
     if file.content_type not in ("application/pdf", "application/x-pdf"):
         raise HTTPException(status_code=415, detail="Only PDF files are supported.")
     try:
+        # #region agent log
+        # NOTE: Do not log secrets (API keys) or resume/JD contents.
+        try:
+            k_raw = os.getenv("GOOGLE_API_KEY")
+            k = (k_raw or "").strip()
+            payload = {
+                "sessionId": "924df7",
+                "runId": "pre-fix",
+                "hypothesisId": "H2",
+                "location": "api/main.py:resume_parse:entry",
+                "message": "Resume parse request received",
+                "data": {
+                    "content_type": file.content_type,
+                    "filename_present": bool(file.filename),
+                    "job_description_len": len(job_description or ""),
+                    "google_api_key_present": bool(k_raw),
+                    "google_api_key_len": len(k),
+                    "gemini_api_key_present": bool((os.getenv("GEMINI_API_KEY") or "").strip()),
+                    "selected_key_source": ("GOOGLE_API_KEY" if k else ("GEMINI_API_KEY" if (os.getenv("GEMINI_API_KEY") or "").strip() else "NONE")),
+                },
+                "timestamp": int(_agent_time.time() * 1000),
+            }
+            with open(_AGENT_LOG_PATH, "a", encoding="utf-8") as f:
+                f.write(json.dumps(payload) + "\n")
+        except Exception:
+            pass
+        # #endregion
+
         pdf_bytes = await file.read()
         text = extract_text_from_pdf(pdf_bytes)
         if not text.strip():

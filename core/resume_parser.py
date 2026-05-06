@@ -3,15 +3,45 @@ import json
 import fitz  # PyMuPDF
 from openai import OpenAI
 from dotenv import load_dotenv
+import time
+from pathlib import Path
 
 # Load environment variables
 load_dotenv()
 
+# Debug log path (repo root)
+_LOG_PATH = str(Path(__file__).resolve().parents[1] / "debug-924df7.log")
+
 # Initialize OpenAI client with Gemini's base URL
+_api_key = (os.getenv("GOOGLE_API_KEY") or "").strip() or (os.getenv("GEMINI_API_KEY") or "").strip()
 client = OpenAI(
-    api_key=os.getenv("GOOGLE_API_KEY"),
+    api_key=_api_key,
     base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
 )
+
+# #region agent log
+# Boot log line to prove logging works (no secrets).
+try:
+    payload = {
+        "sessionId": "924df7",
+        "runId": "pre-fix",
+        "hypothesisId": "H0",
+        "location": "core/resume_parser.py:module_init",
+        "message": "Resume parser module imported",
+        "data": {
+            "log_path": _LOG_PATH,
+            "google_api_key_present": bool((os.getenv("GOOGLE_API_KEY") or "").strip()),
+            "gemini_api_key_present": bool((os.getenv("GEMINI_API_KEY") or "").strip()),
+            "selected_key_source": ("GOOGLE_API_KEY" if (os.getenv("GOOGLE_API_KEY") or "").strip() else ("GEMINI_API_KEY" if (os.getenv("GEMINI_API_KEY") or "").strip() else "NONE")),
+            "selected_key_len": len(_api_key),
+        },
+        "timestamp": int(time.time() * 1000),
+    }
+    with open(_LOG_PATH, "a", encoding="utf-8") as f:
+        f.write(json.dumps(payload) + "\n")
+except Exception:
+    pass
+# #endregion
 
 SYSTEM_PROMPT = """You are an AI Hiring Evaluation Agent.
 
@@ -71,13 +101,40 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> str:
 def parse_resume(resume_text: str, job_description: str) -> dict:
     """Calls Gemini API to evaluate resume against a specific JD."""
     try:
+        # #region agent log
+        # NOTE: Do not log secrets (API keys, resume text, JD text).
+        try:
+            k_raw = os.getenv("GOOGLE_API_KEY")
+            k = (k_raw or "").strip()
+            payload = {
+                "sessionId": "924df7",
+                "runId": "pre-fix",
+                "hypothesisId": "H1",
+                "location": "core/resume_parser.py:parse_resume:env",
+                "message": "Resume parser env snapshot",
+                "data": {
+                    "google_api_key_present": bool(k_raw),
+                    "google_api_key_len": len(k),
+                    "google_api_key_looks_like_aiZa": bool(k) and k.startswith("AIza"),
+                    "gemini_api_key_present": bool((os.getenv("GEMINI_API_KEY") or "").strip()),
+                    "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+                    "model": "gemini-2.5-flash",
+                },
+                "timestamp": int(time.time() * 1000),
+            }
+            with open(_LOG_PATH, "a", encoding="utf-8") as f:
+                f.write(json.dumps(payload) + "\n")
+        except Exception:
+            pass
+        # #endregion
+
         user_content = (
             f"JOB DESCRIPTION:\n-------------------\n{job_description}\n-------------------\n\n"
             f"RESUME TEXT:\n-------------------\n{resume_text}\n-------------------"
         )
         
         response = client.chat.completions.create(
-            model="gemini-3-flash-preview",
+            model="gemini-2.5-flash",
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": user_content}
@@ -94,6 +151,25 @@ def parse_resume(resume_text: str, job_description: str) -> dict:
             
         return json.loads(raw_output)
     except Exception as e:
+        # #region agent log
+        try:
+            payload = {
+                "sessionId": "924df7",
+                "runId": "pre-fix",
+                "hypothesisId": "H3",
+                "location": "core/resume_parser.py:parse_resume:exception",
+                "message": "Resume parser exception",
+                "data": {
+                    "exc_type": type(e).__name__,
+                    "exc_str": str(e)[:500],
+                },
+                "timestamp": int(time.time() * 1000),
+            }
+            with open(_LOG_PATH, "a", encoding="utf-8") as f:
+                f.write(json.dumps(payload) + "\n")
+        except Exception:
+            pass
+        # #endregion
         raise ValueError(f"Resume parsing failed: {e}")
 
 if __name__ == "__main__":

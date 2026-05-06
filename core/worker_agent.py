@@ -9,8 +9,9 @@ load_dotenv()
 
 # Initialize OpenAI client with Gemini's base URL
 # This allows us to use the OpenAI SDK to communicate with Gemini
+_api_key = (os.getenv("GOOGLE_API_KEY") or "").strip() or (os.getenv("GEMINI_API_KEY") or "").strip()
 client = OpenAI(
-    api_key=os.getenv("GOOGLE_API_KEY"),
+    api_key=_api_key,
     base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
 )
 
