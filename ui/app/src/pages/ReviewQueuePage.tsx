@@ -587,6 +587,35 @@ export default function ReviewQueuePage() {
                                   </div>
                                 ))}
                               </div>
+
+                              <div className="mt-4 flex items-center gap-3">
+                                <button
+                                  type="button"
+                                  className="font-sans text-xs font-medium px-3 py-2 rounded-md"
+                                  style={{
+                                    border: '1px solid #E4E2DC',
+                                    backgroundColor: '#FFFFFF',
+                                    color: '#0D0D0D',
+                                    cursor: 'pointer',
+                                  }}
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    const jsonText = JSON.stringify(row.artifact, null, 2)
+                                    const blob = new Blob([jsonText], { type: 'application/json' })
+                                    const url = URL.createObjectURL(blob)
+                                    const a = document.createElement('a')
+                                    a.href = url
+                                    a.download = `artifact_${row.decisionId}.json`
+                                    a.click()
+                                    URL.revokeObjectURL(url)
+                                  }}
+                                >
+                                  Download artifact JSON
+                                </button>
+                                <span className="font-sans text-xs" style={{ color: '#9B9B9B' }}>
+                                  Streamlit parity: “Download Regulatory Export” (client-side)
+                                </span>
+                              </div>
                             </div>
                             <div className="flex-1">
                               <h4 className="font-sans font-medium text-[13px] mb-3" style={{ color: '#0D0D0D' }}>

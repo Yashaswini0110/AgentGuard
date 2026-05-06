@@ -30,9 +30,9 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
 # ---------------------------------------------------------------------------
@@ -47,7 +47,8 @@ from core.policy_engine import check_policy
 from core.risk_router import classify_risk, check_drift
 from core.supervisor import semantic_review
 from core.servicenow import create_incident_with_fallback
-from core.artifact_engine import generate_artifact, save_artifact
+from core.artifact_engine import generate_artifact, save_artifact, export_for_regulator
+from core.resume_parser import extract_text_from_pdf, parse_resume
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -359,6 +360,41 @@ async def get_decision(decision_id: str):
     """
     artifact = _load_artifact(decision_id)
     return artifact
+
+
+@app.get("/decisions/{decision_id}/export", summary="Regulator-ready export (text)")
+async def get_decision_export(decision_id: str):
+    """
+    Returns a regulator-ready export string (header comment block + JSON).
+    """
+    artifact = _load_artifact(decision_id)
+    return PlainTextResponse(export_for_regulator(artifact))
+
+
+@app.post("/resume/parse", summary="Parse PDF resume against a job description")
+async def resume_parse(
+    file: UploadFile = File(...),
+    job_description: str = Form(...),
+):
+    """
+    Accepts a PDF resume and a job description, returns structured candidate JSON.
+    Mirrors the Streamlit dashboard's resume parsing feature.
+    """
+    if file.content_type not in ("application/pdf", "application/x-pdf"):
+        raise HTTPException(status_code=415, detail="Only PDF files are supported.")
+    try:
+        pdf_bytes = await file.read()
+        text = extract_text_from_pdf(pdf_bytes)
+        if not text.strip():
+            raise HTTPException(status_code=400, detail="No text could be extracted from this PDF.")
+        parsed = parse_resume(text, job_description)
+        if not isinstance(parsed, dict):
+            raise HTTPException(status_code=502, detail="Resume parser returned invalid JSON.")
+        return parsed
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Resume parsing failed: {exc}")
 
 
 @app.get("/artifacts/recent", summary="Load recent artifacts in one round-trip")
