@@ -9,9 +9,23 @@ from docx import Document
 from dotenv import load_dotenv
 import time
 from pathlib import Path
+from core.llm_fallback import chat_json
 
 # Load environment variables
 load_dotenv()
+
+# #region agent log
+def _dbg_write(payload: dict) -> None:
+    try:
+        path = str((os.getenv("AGENTGUARD_DEBUG_LOG_PATH") or "debug-ec0bcc.log").strip() or "debug-ec0bcc.log")
+        payload = dict(payload)
+        payload.setdefault("sessionId", "ec0bcc")
+        payload.setdefault("timestamp", int(time.time() * 1000))
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+# #endregion
 
 # Debug log path (repo root)
 _LOG_PATH = str(Path(__file__).resolve().parents[1] / "debug-924df7.log")
@@ -60,6 +74,8 @@ STRICT RULES:
   frameworks, databases, clouds, infra, data tools, testing, observability — not only a short subset.
   If the résumé states it explicitly or clearly implies it under experience, include it.
 - years_of_experience and career_gap_months are numbers (use 0 if unknown).
+- Do NOT include the full resume text in the JSON. Set `"resume_text": ""` always.
+  (The system already stores the raw extracted text separately; including it here causes truncation.)
 
 SCHEMA:
 {
@@ -78,7 +94,7 @@ SCHEMA:
   "resume_text": string
 }
 
-The resume_text field must echo the cleaned free-text resume (may be truncated to 8000 chars if needed).
+The resume_text field must be an empty string.
 """
 
 SYSTEM_PROMPT = """You are an AI Hiring Evaluation Agent.
@@ -207,23 +223,15 @@ def parse_resume(resume_text: str, job_description: str) -> dict:
             f"RESUME TEXT:\n-------------------\n{resume_text}\n-------------------"
         )
         
-        response = client.chat.completions.create(
-            model="gemini-2.5-flash",
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_content}
-            ],
-            response_format={"type": "json_object"}
+        return chat_json(
+            system=SYSTEM_PROMPT,
+            user=user_content,
+            gemini_model=(os.getenv("AG_GEMINI_MODEL_PARSE") or "gemini-2.5-flash").strip(),
+            openrouter_model=(os.getenv("AG_OPENROUTER_MODEL") or "openai/gpt-oss-120b").strip(),
+            temperature=0.0,
+            max_tokens=800,
+            retries=2,
         )
-        
-        raw_output = response.choices[0].message.content.strip()
-        
-        if raw_output.startswith("```json"):
-            raw_output = raw_output[7:-3].strip()
-        elif raw_output.startswith("```"):
-            raw_output = raw_output[3:-3].strip()
-            
-        return json.loads(raw_output)
     except Exception as e:
         # #region agent log
         try:
@@ -366,35 +374,41 @@ def parse_resume_structured(resume_text: str, job_description: str = "") -> dict
 
     user_content = f"RAW RESUME TEXT:\n{resume_text_clean}{jd_note}"
 
-    def _once() -> dict:
-        response = client.chat.completions.create(
-            model="gemini-2.5-flash",
-            messages=[
-                {"role": "system", "content": STRUCTURED_RESUME_PROMPT},
-                {"role": "user", "content": user_content},
-            ],
-            response_format={"type": "json_object"},
-        )
-        raw = (response.choices[0].message.content or "").strip()
-        cleaned = _strip_code_fence(raw)
-        return json.loads(cleaned)
-
-    last_exc: Exception | None = None
-    for delay in (0.0, 0.6, 1.6):
-        if delay:
-            time.sleep(delay)
-        try:
-            data = _once()
-            if not isinstance(data, dict):
-                raise ValueError("structured parser did not return an object")
-            merged = coalesce_candidate_full_name(data)
-            if merged:
-                data["full_name"] = merged
-            return data
-        except Exception as e:
-            last_exc = e
-            continue
-    raise ValueError(f"Structured resume parsing failed after retries: {last_exc}")
+    # #region agent log
+    _dbg_write(
+        {
+            "runId": "resume-structured",
+            "hypothesisId": "H1",
+            "location": "core/resume_parser.py:parse_resume_structured:entry",
+            "message": "Structured parse call",
+            "data": {
+                "resume_len": len(resume_text_clean or ""),
+                "jd_len": len(job_description or ""),
+                "gemini_model": (os.getenv("AG_GEMINI_MODEL_STRUCTURED") or "gemini-2.5-flash").strip(),
+                "openrouter_model": (os.getenv("AG_OPENROUTER_MODEL") or "openai/gpt-oss-120b").strip(),
+                "openrouter_key_present": bool((os.getenv("OPENROUTER_API_KEY") or "").strip()),
+            },
+        }
+    )
+    # #endregion
+    data = chat_json(
+        system=STRUCTURED_RESUME_PROMPT,
+        user=user_content,
+        gemini_model=(os.getenv("AG_GEMINI_MODEL_STRUCTURED") or "gemini-2.5-flash").strip(),
+        openrouter_model=(os.getenv("AG_OPENROUTER_MODEL") or "openai/gpt-oss-120b").strip(),
+        temperature=0.0,
+        max_tokens=int((os.getenv("AG_STRUCTURED_MAX_TOKENS") or "2000").strip() or "2000"),
+        retries=2,
+    )
+    if not isinstance(data, dict):
+        raise ValueError("structured parser did not return an object")
+    merged = coalesce_candidate_full_name(data)
+    if merged:
+        data["full_name"] = merged
+    # Ensure we carry the real extracted text even if the model returns empty/truncated text.
+    # (Structured prompt forces resume_text to be "", to avoid provider truncation.)
+    data["resume_text"] = resume_text_clean[:8000]
+    return data
 
 
 if __name__ == "__main__":

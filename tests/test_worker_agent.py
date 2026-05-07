@@ -17,8 +17,8 @@ def sample_candidate():
         "institution_tier": 2
     }
 
-@patch('core.worker_agent.generate_llm_response')
-def test_make_hiring_decision_format(mock_llm, sample_candidate):
+@patch('core.worker_agent.chat_json')
+def test_make_hiring_decision_format(mock_chat_json, sample_candidate):
     # Mocking the LLM response
     mock_response = {
         "candidate_id": "CAND-001",
@@ -28,7 +28,7 @@ def test_make_hiring_decision_format(mock_llm, sample_candidate):
         "features_used": ["skill_match_score", "assessment_score"],
         "recommended_action": "PROCEED_TO_INTERVIEW"
     }
-    mock_llm.return_value = json.dumps(mock_response)
+    mock_chat_json.return_value = mock_response
 
     result = make_hiring_decision(sample_candidate)
 
@@ -47,8 +47,8 @@ def test_make_hiring_decision_format(mock_llm, sample_candidate):
     # Verify ID match
     assert result["candidate_id"] == sample_candidate["candidate_id"]
 
-@patch('core.worker_agent.generate_llm_response')
-def test_make_hiring_decision_rejection(mock_llm, sample_candidate):
+@patch('core.worker_agent.chat_json')
+def test_make_hiring_decision_rejection(mock_chat_json, sample_candidate):
     mock_response = {
         "candidate_id": "CAND-001",
         "decision": "REJECT",
@@ -57,7 +57,7 @@ def test_make_hiring_decision_rejection(mock_llm, sample_candidate):
         "features_used": ["interview_score"],
         "recommended_action": "REJECT_APPLICATION"
     }
-    mock_llm.return_value = json.dumps(mock_response)
+    mock_chat_json.return_value = mock_response
 
     result = make_hiring_decision(sample_candidate)
     
@@ -65,20 +65,20 @@ def test_make_hiring_decision_rejection(mock_llm, sample_candidate):
     assert result["recommended_action"] == "REJECT_APPLICATION"
     assert 0.0 <= result["confidence"] <= 1.0
 
-@patch('core.worker_agent.generate_llm_response')
-def test_make_hiring_decision_invalid_json(mock_llm, sample_candidate):
-    # Test handling of non-JSON response
-    mock_llm.return_value = "Not a JSON"
-    with pytest.raises(ValueError, match="Invalid JSON from model"):
+@patch('core.worker_agent.chat_json')
+def test_make_hiring_decision_invalid_json(mock_chat_json, sample_candidate):
+    # Test handling of non-JSON response (chat_json raises)
+    mock_chat_json.side_effect = ValueError("LLM JSON parse failed")
+    with pytest.raises(ValueError, match="LLM JSON parse failed"):
         make_hiring_decision(sample_candidate)
 
-@patch('core.worker_agent.generate_llm_response')
-def test_make_hiring_decision_missing_fields(mock_llm, sample_candidate):
+@patch('core.worker_agent.chat_json')
+def test_make_hiring_decision_missing_fields(mock_chat_json, sample_candidate):
     # Test handling of missing required fields
     mock_response = {
         "candidate_id": "CAND-001",
         "decision": "APPROVE"
     }
-    mock_llm.return_value = json.dumps(mock_response)
+    mock_chat_json.return_value = mock_response
     with pytest.raises(ValueError, match="Invalid response format"):
         make_hiring_decision(sample_candidate)

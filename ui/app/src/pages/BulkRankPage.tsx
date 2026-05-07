@@ -3,7 +3,6 @@ import { Link } from 'react-router'
 import { ArrowLeft, ClipboardList, Download, Layers, ShieldAlert } from 'lucide-react'
 import AppShell from '@/components/AppShell'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -34,19 +33,6 @@ function exportUrl(decisionId: string) {
   return joinUrl(apiBase(), `/decisions/${encodeURIComponent(decisionId)}/export`)
 }
 
-function classBadgeTone(c?: string): 'default' | 'secondary' | 'destructive' | 'outline' {
-  switch ((c ?? '').toUpperCase()) {
-    case 'STRONG_MATCH':
-      return 'default'
-    case 'GOOD_MATCH':
-      return 'secondary'
-    case 'BORDERLINE':
-      return 'outline'
-    default:
-      return 'destructive'
-  }
-}
-
 export default function BulkRankPage() {
   const [jobDescription, setJobDescription] = useState('')
   const [openings, setOpenings] = useState(5)
@@ -64,7 +50,7 @@ export default function BulkRankPage() {
     if (!result?.ranked_candidates?.length) return []
     const m: Record<string, number> = {}
     for (const r of result.ranked_candidates) {
-      const k = r.classification ?? 'UNKNOWN'
+      const k = (r.governance_status ?? 'UNKNOWN').toUpperCase()
       m[k] = (m[k] ?? 0) + 1
     }
     return Object.entries(m).map(([name, count]) => ({ name, count }))
@@ -345,7 +331,6 @@ export default function BulkRankPage() {
                       <TableHead className="w-10">#</TableHead>
                       <TableHead>Candidate</TableHead>
                       <TableHead className="text-right">Merit</TableHead>
-                      <TableHead>Class</TableHead>
                       <TableHead>Governance</TableHead>
                       <TableHead className="w-[7.5rem]">Review</TableHead>
                       <TableHead className="w-28">Artifacts</TableHead>
@@ -370,11 +355,6 @@ export default function BulkRankPage() {
                         </TableCell>
                         <TableCell className="text-right font-mono text-xs">
                           {(Number(row.composite_score ?? 0) * 100).toFixed(1)}%
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={classBadgeTone(row.classification)}>
-                            {(row.classification ?? '—').replace(/_/g, ' ')}
-                          </Badge>
                         </TableCell>
                         <TableCell className="text-xs">{row.governance_status ?? '—'}</TableCell>
                         <TableCell>

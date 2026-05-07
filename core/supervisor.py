@@ -2,15 +2,10 @@ import os
 import json
 import datetime
 from dotenv import load_dotenv
-import google.generativeai as genai
+from core.llm_fallback import chat_json
 
 # Load environment variables
 load_dotenv()
-
-# Configure Gemini SDK
-api_key = os.getenv("GEMINI_API_KEY")
-if api_key:
-    genai.configure(api_key=api_key)
 
 def semantic_review(decision: dict, router_result: dict) -> dict:
     """
@@ -54,22 +49,15 @@ Your response must be a JSON object with the following fields:
 - features_flagged: list of strings (names of suspicious features)
 """
 
-        # 3. Call Gemini 2.5 Flash model
-        model = genai.GenerativeModel(
-            model_name="gemini-2.5-flash",
-            generation_config={
-                "temperature": 0.1,
-                "max_output_tokens": 400,
-                "response_mime_type": "application/json"
-            }
+        review_json = chat_json(
+            system=system_prompt,
+            user=user_prompt,
+            gemini_model=(os.getenv("AG_GEMINI_MODEL_SUPERVISOR") or "gemini-2.5-flash").strip(),
+            openrouter_model=(os.getenv("AG_OPENROUTER_MODEL") or "openai/gpt-oss-120b").strip(),
+            temperature=0.1,
+            max_tokens=600,
+            retries=2,
         )
-
-        # Include system prompt in the call
-        response = model.generate_content([system_prompt, user_prompt])
-        
-        # 4. Parse response
-        review_raw = response.text.strip()
-        review_json = json.loads(review_raw)
 
         return {
             "supervisor_verdict": review_json.get("supervisor_verdict", "ESCALATE_TO_HUMAN"),

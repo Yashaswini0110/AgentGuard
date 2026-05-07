@@ -147,8 +147,8 @@ def _merit_classification(
 ) -> tuple[str, str]:
     if (not governance_safe) or policy_blocked:
         return (
-            "REJECT",
-            "Governance pipeline blocked merit visibility (policy BLOCK, RED risk, or supervisor non-approval).",
+            "NOT_SCORED",
+            "Merit score withheld because governance is not clear (policy BLOCK, RED risk, or supervisor non-approval).",
         )
     if composite >= 0.85:
         return ("STRONG_MATCH", "Composite score meets strong threshold with governance-safe signals.")
@@ -156,7 +156,7 @@ def _merit_classification(
         return ("GOOD_MATCH", "Solid multi-signal alignment to the job description.")
     if composite >= 0.50:
         return ("BORDERLINE", "Partial alignment — requires human corroboration beyond automated screening.")
-    return ("REJECT", "Composite score below minimum hiring band.")
+    return ("LOW_MATCH", "Below preferred match band — still eligible if governance is clear.")
 
 
 async def _run_in_thread(fn, *args, **kwargs):

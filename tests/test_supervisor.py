@@ -27,20 +27,17 @@ def sample_data():
     }
     return decision, router_result
 
-@patch("google.generativeai.GenerativeModel")
-def test_semantic_review_success_fields(MockModel, sample_data):
+@patch("core.supervisor.chat_json")
+def test_semantic_review_success_fields(mock_chat_json, sample_data):
     """Test that semantic_review returns all required fields with correct types on success."""
-    # Mock successful Gemini API response
-    mock_instance = MockModel.return_value
-    mock_response = MagicMock()
-    mock_response.text = json.dumps({
+    # Mock successful LLM response
+    mock_chat_json.return_value = {
         "supervisor_verdict": "APPROVE",
         "bias_detected": False,
         "bias_reason": None,
         "confidence": 0.98,
         "features_flagged": []
-    })
-    mock_instance.generate_content.return_value = mock_response
+    }
 
     decision, router_result = sample_data
     result = semantic_review(decision, router_result)
@@ -74,20 +71,17 @@ def test_semantic_review_success_fields(MockModel, sample_data):
     # Timestamp is a string
     assert isinstance(result["review_timestamp"], str)
 
-@patch("google.generativeai.GenerativeModel")
-def test_semantic_review_bias_detection(MockModel, sample_data):
+@patch("core.supervisor.chat_json")
+def test_semantic_review_bias_detection(mock_chat_json, sample_data):
     """Test that semantic_review correctly handles a case where bias is detected."""
-    # Mock Gemini API response flagging bias
-    mock_instance = MockModel.return_value
-    mock_response = MagicMock()
-    mock_response.text = json.dumps({
+    # Mock LLM response flagging bias
+    mock_chat_json.return_value = {
         "supervisor_verdict": "REJECT",
         "bias_detected": True,
         "bias_reason": "Potential indirect bias detected in socioeconomic_background proxy.",
         "confidence": 0.88,
         "features_flagged": ["socioeconomic_background"]
-    })
-    mock_instance.generate_content.return_value = mock_response
+    }
 
     decision, router_result = sample_data
     result = semantic_review(decision, router_result)
@@ -97,12 +91,11 @@ def test_semantic_review_bias_detection(MockModel, sample_data):
     assert "socioeconomic_background" in result["features_flagged"]
     assert "Potential indirect bias" in result["bias_reason"]
 
-@patch("google.generativeai.GenerativeModel")
-def test_semantic_review_exception_handling(MockModel, sample_data):
+@patch("core.supervisor.chat_json")
+def test_semantic_review_exception_handling(mock_chat_json, sample_data):
     """Test that semantic_review fails gracefully and escalates to human on API error."""
-    # Mock Gemini API raising an exception
-    mock_instance = MockModel.return_value
-    mock_instance.generate_content.side_effect = Exception("Service Unavailable")
+    # Mock LLM raising an exception
+    mock_chat_json.side_effect = Exception("Service Unavailable")
 
     decision, router_result = sample_data
     result = semantic_review(decision, router_result)
@@ -114,13 +107,11 @@ def test_semantic_review_exception_handling(MockModel, sample_data):
     assert isinstance(result["review_timestamp"], str)
     assert result["features_flagged"] == []
 
-@patch("google.generativeai.GenerativeModel")
-def test_semantic_review_malformed_json(MockModel, sample_data):
+@patch("core.supervisor.chat_json")
+def test_semantic_review_malformed_json(mock_chat_json, sample_data):
     """Test handling of malformed JSON response from the LLM."""
-    mock_instance = MockModel.return_value
-    mock_response = MagicMock()
-    mock_response.text = "NOT A JSON OBJECT"
-    mock_instance.generate_content.return_value = mock_response
+    # Malformed JSON would have raised inside chat_json; supervisor catches and escalates.
+    mock_chat_json.side_effect = ValueError("NOT A JSON OBJECT")
 
     decision, router_result = sample_data
     result = semantic_review(decision, router_result)
