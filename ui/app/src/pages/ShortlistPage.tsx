@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import AppShell from '@/components/AppShell'
 import { apiBase, fetchRecentArtifacts } from '@/lib/api'
-import { isShortlisted, placeholderEmail, shortlistSource } from '@/lib/artifactHelpers'
+import {
+  formatArtifactTime,
+  isShortlisted,
+  placeholderEmail,
+  shortlistSource,
+} from '@/lib/artifactHelpers'
 
 interface CandidateRow {
   id: string
@@ -9,6 +14,9 @@ interface CandidateRow {
   role: string
   source: string
   email: string
+  /** Present when shortlisted via tech ACCEPT — shown to HR */
+  techReviewerId?: string
+  techReviewedAtLabel?: string
 }
 
 export default function ShortlistPage() {
@@ -49,6 +57,12 @@ Company Inc.`
           role: 'Applicant',
           source: shortlistSource(a),
           email: placeholderEmail(a.candidate_name, a.decision_id),
+          techReviewerId:
+            a.tech_review?.decision === 'ACCEPT' ? a.tech_review.reviewer_id : undefined,
+          techReviewedAtLabel:
+            a.tech_review?.decision === 'ACCEPT'
+              ? formatArtifactTime(a.tech_review.reviewed_at)
+              : undefined,
         }))
       setCandidates(rows)
     } catch (e) {
@@ -100,8 +114,8 @@ Company Inc.`
             Shortlist & Email
           </h1>
           <p className="font-sans text-sm mt-1" style={{ color: '#6B6B6B' }}>
-            Candidates derived from artefacts (GREEN PASS, supervisor APPROVE, HR override, or tech ACCEPT) ·{' '}
-            <span className="font-mono text-xs">{apiBase()}</span>
+            Candidates derived from artefacts (GREEN PASS, supervisor APPROVE, HR override, or tech ACCEPT). For tech-approved
+            rows, the reviewer id from Tech Review is shown below · <span className="font-mono text-xs">{apiBase()}</span>
           </p>
           {loadErr && (
             <p className="font-sans text-xs mt-2" style={{ color: '#B91C1C' }}>
@@ -175,13 +189,21 @@ Company Inc.`
                     onChange={() => toggleCandidate(c.id)}
                     style={{ width: '16px', height: '16px', accentColor: '#0D6EFD' }}
                   />
-                  <div className="flex-1">
+                  <div className="flex-1 min-w-0">
                     <div className="font-sans font-medium text-sm" style={{ color: '#0D0D0D' }}>
                       {c.name}
                     </div>
                     <div className="font-sans text-xs" style={{ color: '#9B9B9B' }}>
                       {c.role}
                     </div>
+                    {c.techReviewerId && (
+                      <div className="font-sans text-[11px] mt-1" style={{ color: '#5B21B6' }}>
+                        Technical review · <span className="font-mono">{c.techReviewerId}</span>
+                        {c.techReviewedAtLabel ? (
+                          <span style={{ color: '#9B9B9B' }}> · {c.techReviewedAtLabel}</span>
+                        ) : null}
+                      </div>
+                    )}
                   </div>
                   <div className="flex items-center gap-2 mr-4">
                     <div

@@ -13,8 +13,7 @@ import {
   violationLabel,
 } from '@/lib/artifactHelpers'
 import type { AgentGuardArtifact } from '@/types/agentguard'
-
-const HR_REVIEWER = 'HR-COMPLIANCE-01'
+import { useDemoAuth } from '@/contexts/DemoAuthContext'
 
 type ReviewStatus =
   | 'BLOCKED'
@@ -164,6 +163,7 @@ function statusToDot(status: ReviewStatus): { color: 'green' | 'amber' | 'red' |
 }
 
 export default function ReviewQueuePage() {
+  const { user } = useDemoAuth()
   const [searchParams] = useSearchParams()
   const highlightDecision = searchParams.get('decision')
   const sessionFilter = searchParams.get('session')
@@ -227,20 +227,21 @@ export default function ReviewQueuePage() {
     setBusyId(actionState.id)
     const note = actionState.note.trim()
     try {
+      const reviewerId = user?.id ?? 'HR-UNKNOWN'
       if (actionState.type === 'approve') {
         await postHumanReview(row.decisionId, {
           action: 'APPROVE',
-          reviewer_id: HR_REVIEWER,
+          reviewer_id: reviewerId,
           reason: note || 'HR override approval recorded from AgentGuard UI.',
         })
       } else if (actionState.type === 'reject') {
         await postHumanReview(row.decisionId, {
           action: 'REJECT',
-          reviewer_id: HR_REVIEWER,
+          reviewer_id: reviewerId,
           reason: note || 'Rejected from review queue.',
         })
       } else if (actionState.type === 'escalate') {
-        await postEscalate(row.decisionId, { reviewer_id: HR_REVIEWER, note })
+        await postEscalate(row.decisionId, { reviewer_id: reviewerId, note })
       }
       await reload()
     } catch (e) {

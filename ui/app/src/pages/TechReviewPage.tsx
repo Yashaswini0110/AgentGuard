@@ -8,8 +8,7 @@ import {
   shortHash,
 } from '@/lib/artifactHelpers'
 import type { AgentGuardArtifact } from '@/types/agentguard'
-
-const TECH_REVIEWER = 'TECH-LEAD-01'
+import { useDemoAuth } from '@/contexts/DemoAuthContext'
 
 interface TechCase {
   id: string
@@ -98,6 +97,7 @@ function ShapBar({ value }: { value: number }) {
 }
 
 export default function TechReviewPage() {
+  const { user } = useDemoAuth()
   const [cases, setCases] = useState<TechCase[]>([])
   const [techNotes, setTechNotes] = useState<Record<string, string>>({})
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -130,7 +130,7 @@ export default function TechReviewPage() {
     try {
       await postTechReview(c.decisionId, {
         action,
-        reviewer_id: TECH_REVIEWER,
+        reviewer_id: user?.id ?? 'TECH-REVIEWER-UNKNOWN',
         note: techNotes[id] ?? '',
       })
       await reload()

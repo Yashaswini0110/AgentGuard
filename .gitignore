@@ -18,7 +18,9 @@ dist/
 downloads/
 eggs/
 .eggs/
+# NOTE: keep root-level `lib/` ignored (python envs), but allow UI code under `ui/**/src/lib/`.
 lib/
+!ui/**/src/lib/
 lib64/
 parts/
 sdist/

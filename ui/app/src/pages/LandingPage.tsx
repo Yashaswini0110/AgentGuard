@@ -17,11 +17,11 @@ export default function LandingPage() {
             <span className="font-mono text-[11px]" style={{ color: '#6B7280' }}>v3</span>
           </div>
           <Link
-            to="/dashboard"
+            to="/login"
             className="inline-flex items-center gap-1 font-sans text-sm px-4 py-2 rounded-md transition-colors hover:opacity-90"
             style={{ border: '1px solid #FFFFFF', color: '#FFFFFF', textDecoration: 'none' }}
           >
-            Enter Dashboard <ArrowRight size={14} />
+            Demo sign-in <ArrowRight size={14} />
           </Link>
         </div>
 
@@ -47,11 +47,11 @@ export default function LandingPage() {
           </p>
           <div className="flex items-center gap-4 mt-9">
             <Link
-              to="/dashboard"
+              to="/login"
               className="inline-flex items-center gap-1 font-sans text-sm font-medium px-6 py-3 rounded-lg transition-opacity hover:opacity-90"
               style={{ backgroundColor: '#0D6EFD', color: '#FFFFFF', textDecoration: 'none' }}
             >
-              View Dashboard <ArrowRight size={14} />
+              Sign in (demo) <ArrowRight size={14} />
             </Link>
             <button
               className="inline-flex items-center gap-1 font-sans text-sm px-6 py-3 rounded-lg bg-transparent transition-opacity hover:opacity-80"
