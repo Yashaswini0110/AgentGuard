@@ -20,7 +20,7 @@ def generate_llm_response(prompt: str) -> str:
     """Calls Gemini API using OpenAI-compatible endpoint."""
     try:
         response = client.chat.completions.create(
-            model="gemini-2.5-flash",
+            model="gemini-2.0-flash",
             messages=[{"role": "user", "content": prompt}]
         )
         return response.choices[0].message.content

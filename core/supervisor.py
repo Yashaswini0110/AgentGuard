@@ -60,9 +60,9 @@ Your response must be a JSON object with the following fields:
 - features_flagged: list of strings (names of suspicious features)
 """
 
-        # 3. Call Gemini 2.5 Flash model
+        # 3. Call Gemini 2.0 Flash model
         model = genai.GenerativeModel(
-            model_name="gemini-2.5-flash",
+            model_name="gemini-2.0-flash",
             generation_config={
                 "temperature": 0.1,
                 "max_output_tokens": 400,

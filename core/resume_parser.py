@@ -78,7 +78,7 @@ def parse_resume(resume_text: str, job_description: str) -> dict:
         )
         
         response = client.chat.completions.create(
-            model="gemini-2.5-flash",
+            model="gemini-2.0-flash",
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": user_content}
