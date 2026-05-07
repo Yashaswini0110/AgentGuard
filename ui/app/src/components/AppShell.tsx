@@ -7,7 +7,6 @@ const navLinks = [
   { to: '/incidents', label: 'Incident queue' },
   { to: '/policies', label: 'Policies' },
   { to: '/artifacts', label: 'Artifacts' },
-  { to: '/agents', label: 'Agents' },
   { to: '/scenario-lab', label: 'Scenario lab' },
 ]
 

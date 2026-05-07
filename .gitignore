@@ -37,6 +37,14 @@ coverage.xml
 *.cover
 .hypothesis/
 
+# Logs / generated debug output
+*.log
+debug-*.log
+
+# Node: root has no package.json; keep ui/app/package-lock.json tracked.
+/package-lock.json
+node_modules/
+
 # Local data & Scratch
 scratch/
 data/

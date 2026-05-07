@@ -1,0 +1,13 @@
+{
+  "scenario_id": "case_b_yellow",
+  "label": "Case B - YELLOW borderline review",
+  "candidate_id": "CASE-B-YELLOW",
+  "name": "Neha Verma",
+  "years_of_experience": 2.5,
+  "skill_match_score": 0.61,
+  "interview_score": 64,
+  "assessment_score": 62,
+  "career_gap_months": 4,
+  "institution_tier": 3,
+  "scenario_demo_inject_feature": "portfolio_quality"
+}

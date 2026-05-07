@@ -4,6 +4,72 @@ import { ArrowLeft } from 'lucide-react'
 import AppShell from '@/components/AppShell'
 import { postDecision, postResumeParse } from '@/lib/api'
 
+const DEMO_SCENARIOS = [
+  {
+    label: 'Case A — GREEN clean pass',
+    description: 'High-confidence safe-feature evaluation.',
+    values: {
+      candidate_id: 'CASE-A-GREEN',
+      name: 'Asha Rao',
+      years_of_experience: 8,
+      skill_match_score: 0.94,
+      interview_score: 91,
+      assessment_score: 89,
+      career_gap_months: 0,
+      gender: '',
+      institution_tier: 2,
+      showProxyFields: false,
+      applicant_surname: '',
+      home_district: '',
+      village_code: '',
+      emotion_score: 0.45,
+      demoInject: '',
+    },
+  },
+  {
+    label: 'Case B — YELLOW borderline review',
+    description: 'Borderline confidence path intended for human oversight demo.',
+    values: {
+      candidate_id: 'CASE-B-YELLOW',
+      name: 'Neha Verma',
+      years_of_experience: 2.5,
+      skill_match_score: 0.61,
+      interview_score: 64,
+      assessment_score: 62,
+      career_gap_months: 4,
+      gender: '',
+      institution_tier: 3,
+      showProxyFields: false,
+      applicant_surname: '',
+      home_district: '',
+      village_code: '',
+      emotion_score: 0.45,
+      demoInject: 'portfolio_quality',
+    },
+  },
+  {
+    label: 'Case C — RED policy hard block',
+    description: 'Prohibited emotion-score signal; router is skipped.',
+    values: {
+      candidate_id: 'CASE-C-RED',
+      name: 'Rohan Mehta',
+      years_of_experience: 4,
+      skill_match_score: 0.79,
+      interview_score: 76,
+      assessment_score: 74,
+      career_gap_months: 0,
+      gender: '',
+      institution_tier: 2,
+      showProxyFields: true,
+      applicant_surname: '',
+      home_district: '',
+      village_code: '',
+      emotion_score: 0.82,
+      demoInject: 'emotion_score',
+    },
+  },
+]
+
 export default function RunDecisionPage() {
   const navigate = useNavigate()
   const [loading, setLoading] = useState(false)
@@ -44,6 +110,26 @@ export default function RunDecisionPage() {
   const [village_code, setVillageCode] = useState('')
   const [emotion_score, setEmotionScore] = useState(0.45)
   const [demoInject, setDemoInject] = useState('')
+
+  const applyScenario = (scenario: (typeof DEMO_SCENARIOS)[number]) => {
+    const v = scenario.values
+    setInputMode('manual')
+    setCandidateId(v.candidate_id)
+    setName(v.name)
+    setYears(v.years_of_experience)
+    setSkill(v.skill_match_score)
+    setInterview(v.interview_score)
+    setAssessment(v.assessment_score)
+    setGap(v.career_gap_months)
+    setGender(v.gender)
+    setTier(v.institution_tier)
+    setShowProxyFields(v.showProxyFields)
+    setSurname(v.applicant_surname)
+    setHomeDistrict(v.home_district)
+    setVillageCode(v.village_code)
+    setEmotionScore(v.emotion_score)
+    setDemoInject(v.demoInject)
+  }
 
   const handleParseResume = async () => {
     setParseError(null)
@@ -169,6 +255,30 @@ export default function RunDecisionPage() {
           maxWidth: '720px',
         }}
       >
+        <div className="mb-5">
+          <div className="font-sans font-semibold text-sm mb-2" style={{ color: '#0D0D0D' }}>
+            One-click demo scenarios
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            {DEMO_SCENARIOS.map((scenario) => (
+              <button
+                key={scenario.label}
+                type="button"
+                onClick={() => applyScenario(scenario)}
+                className="text-left rounded-md p-3"
+                style={{ border: '1px solid #E4E2DC', backgroundColor: '#F7F6F3', cursor: 'pointer' }}
+              >
+                <div className="font-sans font-semibold text-xs" style={{ color: '#0D0D0D' }}>
+                  {scenario.label}
+                </div>
+                <div className="font-sans text-[11px] mt-1" style={{ color: '#6B6B6B' }}>
+                  {scenario.description}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div
           className="mb-5"
           style={{

@@ -5,7 +5,6 @@ import DecisionStreamPage from './pages/DecisionStreamPage'
 import InvestigationPage from './pages/InvestigationPage'
 import IncidentQueuePage from './pages/IncidentQueuePage'
 import PoliciesPage from './pages/PoliciesPage'
-import AgentsPage from './pages/AgentsPage'
 import ArtifactsPage from './pages/ArtifactsPage'
 import RunDecisionPage from './pages/RunDecisionPage'
 
@@ -22,7 +21,6 @@ export default function App() {
       <Route path="/incidents" element={<IncidentQueuePage />} />
       <Route path="/policies" element={<PoliciesPage />} />
       <Route path="/artifacts" element={<ArtifactsPage />} />
-      <Route path="/agents" element={<AgentsPage />} />
       <Route path="/scenario-lab" element={<RunDecisionPage />} />
       <Route path="/run" element={<Navigate to="/scenario-lab" replace />} />
 

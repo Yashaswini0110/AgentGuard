@@ -1,6 +1,0 @@
-{
-  "scenario_id": "medical_triage_demo_v1",
-  "description": "Placeholder triage scenario — add adapter when core trace API is stable.",
-  "subject": { "patient_ref": "PTS-88421" },
-  "expected_governance_focus": ["SAFETY", "HUMAN_IN_LOOP"]
-}

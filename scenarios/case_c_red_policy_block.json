@@ -1,0 +1,14 @@
+{
+  "scenario_id": "case_c_red_policy_block",
+  "label": "Case C - RED policy hard block",
+  "candidate_id": "CASE-C-RED",
+  "name": "Rohan Mehta",
+  "years_of_experience": 4,
+  "skill_match_score": 0.79,
+  "interview_score": 76,
+  "assessment_score": 74,
+  "career_gap_months": 0,
+  "institution_tier": 2,
+  "emotion_score": 0.82,
+  "scenario_demo_inject_feature": "emotion_score"
+}
