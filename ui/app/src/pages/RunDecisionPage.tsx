@@ -43,6 +43,7 @@ export default function RunDecisionPage() {
   const [home_district, setHomeDistrict] = useState('')
   const [village_code, setVillageCode] = useState('')
   const [emotion_score, setEmotionScore] = useState(0.45)
+  const [demoInject, setDemoInject] = useState('')
 
   const handleParseResume = async () => {
     setParseError(null)
@@ -112,10 +113,11 @@ export default function RunDecisionPage() {
               emotion_score: emotion_score,
             }
           : {}),
+        ...(demoInject.trim() ? { scenario_demo_inject_feature: demoInject.trim() } : {}),
       }
 
       await postDecision(payload)
-      navigate('/dashboard')
+      navigate('/mission-control')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Pipeline failed')
     } finally {
@@ -141,19 +143,19 @@ export default function RunDecisionPage() {
     <AppShell>
       <div className="mb-6">
         <Link
-          to="/dashboard"
+          to="/mission-control"
           className="inline-flex items-center gap-1 font-sans text-sm mb-4"
           style={{ color: '#0D6EFD', textDecoration: 'none' }}
         >
-          <ArrowLeft size={14} /> Back to dashboard
+          <ArrowLeft size={14} /> Mission control
         </Link>
         <h1 className="font-sans font-semibold" style={{ fontSize: '22px', color: '#0D0D0D' }}>
-          Run governance pipeline
+          Scenario lab — hiring domain adapter
         </h1>
         <p className="font-sans text-sm mt-1" style={{ color: '#6B6B6B' }}>
-          Submits one candidate to{' '}
-          <span className="font-mono text-xs">POST /decision</span> — worker agent, policy engine,
-          risk router, supervisor (YELLOW), ServiceNow (RED), and signed artifact.
+          Generates demonstration subject payloads and posts to{' '}
+          <span className="font-mono text-xs">POST /v2/evaluate</span>. This is not a recruiting product —
+          it exercises the governance control plane contracts with a plausible HR-shaped adapter.
         </p>
       </div>
 
@@ -408,11 +410,6 @@ export default function RunDecisionPage() {
           </div>
         </div>
 
-        <p className="font-sans text-xs mt-4" style={{ color: '#9B9B9B' }}>
-          The worker agent may inject prohibited features in about 30% of runs (simulated biased model). Run again
-          if you need a RED / policy-block demo.
-        </p>
-
         <label className="flex items-center gap-2 mt-4 cursor-pointer">
           <input
             type="checkbox"
@@ -462,6 +459,21 @@ export default function RunDecisionPage() {
           </div>
         )}
 
+        <div className="mt-6">
+          <label className={labelCls} style={labelStyle}>
+            Scenario inject — prohibited feature claim (explicit demo knob)
+          </label>
+          <input
+            value={demoInject}
+            onChange={(e) => setDemoInject(e.target.value)}
+            placeholder="e.g. emotion_score — appended to agent output for deterministic policy rehearsal"
+            style={inputStyle}
+          />
+          <p className="font-sans text-[11px] mt-2" style={{ color: '#9B9B9B' }}>
+            Optional. Replaces the old probabilistic injection with an explicit Scenario Lab signal for audits.
+          </p>
+        </div>
+
         {error && (
           <p className="font-sans text-sm mt-4" style={{ color: '#B91C1C' }}>
             {error}
@@ -480,7 +492,7 @@ export default function RunDecisionPage() {
               cursor: loading ? 'not-allowed' : 'pointer',
             }}
           >
-            {loading ? 'Running pipeline…' : 'Run AgentGuard pipeline'}
+            {loading ? 'Evaluating ingress…' : 'Evaluate governance pipeline'}
           </button>
         </div>
       </form>

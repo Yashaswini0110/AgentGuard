@@ -182,13 +182,13 @@ def client() -> Generator[TestClient, None, None]:
     artifact_stub_green = _make_artifact_stub("GREEN")
 
     with (
-        patch("api.main.make_hiring_decision", return_value=_DECISION_STUB) as _,
-        patch("api.main.check_policy", return_value=_POLICY_PASS_STUB) as _,
-        patch("api.main.classify_risk", return_value=_ROUTER_GREEN_STUB) as _,
-        patch("api.main.semantic_review", return_value=_SUPERVISOR_STUB) as _,
-        patch("api.main.create_incident_with_fallback", return_value=_SERVICENOW_STUB) as _,
-        patch("api.main.generate_artifact", return_value=artifact_stub_green) as _,
-        patch("api.main.save_artifact", return_value="/tmp/test_artifact.json") as _,
+        patch("api.pipeline.make_hiring_decision", return_value=_DECISION_STUB) as _,
+        patch("api.pipeline.check_policy", return_value=_POLICY_PASS_STUB) as _,
+        patch("api.pipeline.classify_risk", return_value=_ROUTER_GREEN_STUB) as _,
+        patch("api.pipeline.semantic_review", return_value=_SUPERVISOR_STUB) as _,
+        patch("api.pipeline.create_incident_with_fallback", return_value=_SERVICENOW_STUB) as _,
+        patch("api.pipeline.generate_artifact", return_value=artifact_stub_green) as _,
+        patch("api.pipeline.save_artifact", return_value="/tmp/test_artifact.json") as _,
     ):
         with TestClient(app, raise_server_exceptions=True) as tc:
             yield tc
@@ -210,7 +210,7 @@ class TestHealth:
     def test_version_field_present(self, client: TestClient):
         data = client.get("/health").json()
         assert "version" in data
-        assert data["version"] == "3.1"
+        assert data["version"] == "3.2"
 
 
 # ---------------------------------------------------------------------------
@@ -262,14 +262,14 @@ class TestDecisionBiased:
         artifact_red = _make_artifact_stub("RED")
 
         with (
-            patch("api.main.make_hiring_decision", return_value=_DECISION_STUB_BIASED),
-            patch("api.main.check_policy", return_value=_POLICY_BLOCK_STUB),
+            patch("api.pipeline.make_hiring_decision", return_value=_DECISION_STUB_BIASED),
+            patch("api.pipeline.check_policy", return_value=_POLICY_BLOCK_STUB),
             # classify_risk should NOT be called, but mock it defensively
-            patch("api.main.classify_risk", return_value=_ROUTER_GREEN_STUB),
-            patch("api.main.semantic_review", return_value=_SUPERVISOR_STUB),
-            patch("api.main.create_incident_with_fallback", return_value=_SERVICENOW_STUB),
-            patch("api.main.generate_artifact", return_value=artifact_red),
-            patch("api.main.save_artifact", return_value="/tmp/test_red.json"),
+            patch("api.pipeline.classify_risk", return_value=_ROUTER_GREEN_STUB),
+            patch("api.pipeline.semantic_review", return_value=_SUPERVISOR_STUB),
+            patch("api.pipeline.create_incident_with_fallback", return_value=_SERVICENOW_STUB),
+            patch("api.pipeline.generate_artifact", return_value=artifact_red),
+            patch("api.pipeline.save_artifact", return_value="/tmp/test_red.json"),
         ):
             with TestClient(app, raise_server_exceptions=True) as tc:
                 response = tc.post("/decision", json=_BIASED_CANDIDATE)
@@ -285,13 +285,13 @@ class TestDecisionBiased:
         sn_mock = MagicMock(return_value=_SERVICENOW_STUB)
 
         with (
-            patch("api.main.make_hiring_decision", return_value=_DECISION_STUB_BIASED),
-            patch("api.main.check_policy", return_value=_POLICY_BLOCK_STUB),
-            patch("api.main.classify_risk", return_value=_ROUTER_GREEN_STUB),
-            patch("api.main.semantic_review", return_value=_SUPERVISOR_STUB),
-            patch("api.main.create_incident_with_fallback", sn_mock),
-            patch("api.main.generate_artifact", return_value=artifact_red),
-            patch("api.main.save_artifact", return_value="/tmp/test_red2.json"),
+            patch("api.pipeline.make_hiring_decision", return_value=_DECISION_STUB_BIASED),
+            patch("api.pipeline.check_policy", return_value=_POLICY_BLOCK_STUB),
+            patch("api.pipeline.classify_risk", return_value=_ROUTER_GREEN_STUB),
+            patch("api.pipeline.semantic_review", return_value=_SUPERVISOR_STUB),
+            patch("api.pipeline.create_incident_with_fallback", sn_mock),
+            patch("api.pipeline.generate_artifact", return_value=artifact_red),
+            patch("api.pipeline.save_artifact", return_value="/tmp/test_red2.json"),
         ):
             with TestClient(app, raise_server_exceptions=True) as tc:
                 tc.post("/decision", json=_BIASED_CANDIDATE)
@@ -302,13 +302,13 @@ class TestDecisionBiased:
         artifact_red = _make_artifact_stub("RED")
 
         with (
-            patch("api.main.make_hiring_decision", return_value=_DECISION_STUB_BIASED),
-            patch("api.main.check_policy", return_value=_POLICY_BLOCK_STUB),
-            patch("api.main.classify_risk", return_value=_ROUTER_GREEN_STUB),
-            patch("api.main.semantic_review", return_value=_SUPERVISOR_STUB),
-            patch("api.main.create_incident_with_fallback", return_value=_SERVICENOW_STUB),
-            patch("api.main.generate_artifact", return_value=artifact_red),
-            patch("api.main.save_artifact", return_value="/tmp/test_red3.json"),
+            patch("api.pipeline.make_hiring_decision", return_value=_DECISION_STUB_BIASED),
+            patch("api.pipeline.check_policy", return_value=_POLICY_BLOCK_STUB),
+            patch("api.pipeline.classify_risk", return_value=_ROUTER_GREEN_STUB),
+            patch("api.pipeline.semantic_review", return_value=_SUPERVISOR_STUB),
+            patch("api.pipeline.create_incident_with_fallback", return_value=_SERVICENOW_STUB),
+            patch("api.pipeline.generate_artifact", return_value=artifact_red),
+            patch("api.pipeline.save_artifact", return_value="/tmp/test_red3.json"),
         ):
             with TestClient(app, raise_server_exceptions=True) as tc:
                 data = tc.post("/decision", json=_BIASED_CANDIDATE).json()
@@ -434,13 +434,13 @@ class TestDecisionYellow:
         supervisor_mock = MagicMock(return_value=_SUPERVISOR_STUB)
 
         with (
-            patch("api.main.make_hiring_decision", return_value=_DECISION_STUB),
-            patch("api.main.check_policy", return_value=_POLICY_PASS_STUB),
-            patch("api.main.classify_risk", return_value=_ROUTER_YELLOW_STUB),
-            patch("api.main.semantic_review", supervisor_mock),
-            patch("api.main.create_incident_with_fallback", return_value=_SERVICENOW_STUB),
-            patch("api.main.generate_artifact", return_value=artifact_yellow),
-            patch("api.main.save_artifact", return_value="/tmp/test_yellow.json"),
+            patch("api.pipeline.make_hiring_decision", return_value=_DECISION_STUB),
+            patch("api.pipeline.check_policy", return_value=_POLICY_PASS_STUB),
+            patch("api.pipeline.classify_risk", return_value=_ROUTER_YELLOW_STUB),
+            patch("api.pipeline.semantic_review", supervisor_mock),
+            patch("api.pipeline.create_incident_with_fallback", return_value=_SERVICENOW_STUB),
+            patch("api.pipeline.generate_artifact", return_value=artifact_yellow),
+            patch("api.pipeline.save_artifact", return_value="/tmp/test_yellow.json"),
         ):
             with TestClient(app, raise_server_exceptions=True) as tc:
                 data = tc.post("/decision", json=_CLEAN_CANDIDATE).json()
@@ -452,7 +452,7 @@ class TestDecisionYellow:
     def test_supervisor_not_called_when_green(self, client: TestClient):
         """Module-scoped client uses GREEN stub — supervisor must NOT be called."""
         supervisor_mock = MagicMock(return_value=_SUPERVISOR_STUB)
-        with patch("api.main.semantic_review", supervisor_mock):
+        with patch("api.pipeline.semantic_review", supervisor_mock):
             client.post("/decision", json=_CLEAN_CANDIDATE)
 
         # classify_risk returns GREEN → supervisor branch is skipped

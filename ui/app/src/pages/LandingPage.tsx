@@ -17,11 +17,11 @@ export default function LandingPage() {
             <span className="font-mono text-[11px]" style={{ color: '#6B7280' }}>v3</span>
           </div>
           <Link
-            to="/dashboard"
+            to="/decisions"
             className="inline-flex items-center gap-1 font-sans text-sm px-4 py-2 rounded-md transition-colors hover:opacity-90"
             style={{ border: '1px solid #FFFFFF', color: '#FFFFFF', textDecoration: 'none' }}
           >
-            Enter Dashboard <ArrowRight size={14} />
+            Open decision stream <ArrowRight size={14} />
           </Link>
         </div>
 
@@ -37,21 +37,22 @@ export default function LandingPage() {
             className="font-sans font-semibold text-white"
             style={{ fontSize: '44px', lineHeight: '1.15', maxWidth: '560px' }}
           >
-            Stop discriminatory AI hiring before it happens.
+            Govern enterprise AI actions before execution.
           </h1>
           <p
             className="font-sans text-base mt-5"
             style={{ color: '#9CA3AF', maxWidth: '520px' }}
           >
-            AgentGuard v3 intercepts AI hiring decisions in real time, checks them for bias and regulatory violations, and generates tamper-proof legal evidence of every decision made.
+            AgentGuard is runtime governance middleware: deterministic policy gates, explainable risk routing,
+            supervisory review, immutable artifacts, and ITSM escalation when decisions must not proceed unchanged.
           </p>
           <div className="flex items-center gap-4 mt-9">
             <Link
-              to="/dashboard"
+              to="/mission-control"
               className="inline-flex items-center gap-1 font-sans text-sm font-medium px-6 py-3 rounded-lg transition-opacity hover:opacity-90"
               style={{ backgroundColor: '#0D6EFD', color: '#FFFFFF', textDecoration: 'none' }}
             >
-              View Dashboard <ArrowRight size={14} />
+              Mission control <ArrowRight size={14} />
             </Link>
             <button
               className="inline-flex items-center gap-1 font-sans text-sm px-6 py-3 rounded-lg bg-transparent transition-opacity hover:opacity-80"
@@ -134,7 +135,7 @@ export default function LandingPage() {
         }}
       >
         <span className="font-mono text-xs" style={{ color: '#6B7280' }}>
-          AgentGuard v3.1 — AI Governance Control Plane for Enterprise HR
+          AgentGuard — runtime AI governance control plane (React product surface · v3.2 APIs)
         </span>
         <span className="font-mono text-xs" style={{ color: '#6B7280' }}>
           Built for UNISYS Innovation Challenge 2026

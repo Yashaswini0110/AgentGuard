@@ -1,0 +1,6 @@
+{
+  "scenario_id": "loan_approval_demo_v1",
+  "description": "Thin fixture for a future lending adapter — not wired to the governance pipeline yet.",
+  "subject": { "application_id": "LOAN-20394" },
+  "expected_governance_focus": ["AFFORDABILITY_MODEL", "FAIR_LENDING"]
+}

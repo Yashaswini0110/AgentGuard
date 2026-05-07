@@ -21,6 +21,15 @@ def generate_artifact(
     router_result: dict,
     servicenow_ticket_id: str = None,
     supervisor_result: dict | None = None,
+    *,
+    trace_id: str | None = None,
+    agent_identity: dict | None = None,
+    evidence: dict | None = None,
+    governance_events: list | None = None,
+    router_features: dict | None = None,
+    router_probabilities: dict | None = None,
+    shap_explained_class: str | None = None,
+    router_skipped_reason: str | None = None,
 ) -> dict:
     """
     Build and return a cryptographically signed compliance artifact dict.
@@ -57,8 +66,20 @@ def generate_artifact(
     # ------------------------------------------------------------------ #
     # Build the artifact WITHOUT the hash field first                      #
     # ------------------------------------------------------------------ #
+    did = str(uuid.uuid4())
+    tid = trace_id or did
+
+    fu = decision.get("features_used")
+    if isinstance(fu, list):
+        features_list = fu
+    elif isinstance(fu, dict):
+        features_list = list(fu.keys())
+    else:
+        features_list = []
+
     artifact_body: dict = {
-        "decision_id":             str(uuid.uuid4()),
+        "decision_id":             did,
+        "trace_id":                tid,
         "timestamp":               datetime.now(timezone.utc).isoformat(),
         "candidate_id":            decision.get("candidate_id"),
         "candidate_name":          decision.get("candidate_name"),
@@ -69,11 +90,28 @@ def generate_artifact(
         "regulation_reference":    first_violation.get("regulation", "N/A") if first_violation else "N/A",
         "routing_classification":  router_result.get("routing_classification"),  # GREEN | YELLOW | RED
         "confidence_score":        router_result.get("confidence_score"),
-        "features_used":           decision.get("features_used", {}),
+        "features_used":           features_list,
         "shap_scores":             router_result.get("shap_scores", {}),
         "model_version_hash":      router_result.get("model_version_hash"),
         "servicenow_ticket_id":    servicenow_ticket_id,
     }
+
+    if agent_identity:
+        artifact_body["agent_identity"] = agent_identity
+    if evidence:
+        artifact_body["evidence"] = evidence
+    if governance_events:
+        artifact_body["governance_events"] = governance_events
+
+    # Explainability context (operationally critical)
+    if router_features is not None:
+        artifact_body["router_features"] = router_features
+    if router_probabilities is not None:
+        artifact_body["router_probabilities"] = router_probabilities
+    if shap_explained_class is not None:
+        artifact_body["shap_explained_class"] = shap_explained_class
+    if router_skipped_reason is not None:
+        artifact_body["router_skipped_reason"] = router_skipped_reason
 
     if supervisor_result is not None:
         artifact_body["supervisor_review"] = supervisor_result

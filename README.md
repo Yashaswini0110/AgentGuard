@@ -1,17 +1,21 @@
-# 🛡️ AgentGuard v3
-### AI Governance Control Plane for Enterprise HR
+# AgentGuard v3
+
+### Runtime AI governance control plane (enterprise)
+
+Prevents unacceptable autonomous AI outcomes **before downstream execution** — deterministic policies,
+risk-aware routing, optional supervisory review, immutable artifacts, and regulated escalation hooks.
 
 **Unisys Innovation Program 2026**
 
 ---
 
-> *"We don't audit what your AI did yesterday. We stop what it should not do today."*
+> Policy-first interception beats hindsight dashboards — regulate autonomous actors inside regulated footprints.
 
 ---
 
-## The Problem
+## The Problem — unchecked autonomy everywhere regulated footprints converge
 
-Indian companies use AI to screen thousands of job applications automatically. These systems are trained on historical hiring data — data that reflects years of human bias. They penalise candidates based on college tier, surname, and emotional expression during video interviews. These are proxies for caste, gender, and socioeconomic background. Nobody stops these decisions before they execute.
+As an example, AI-assisted hiring systems are trained on historical data that encodes bias. They may penalise candidates using college tier, surname, or emotional signals from interviews — proxies for caste, gender, and socioeconomic background — before any human sees the case. The same class of risk appears wherever agents touch regulated decisions: lending, triage, and benefits automation.
 
 The rejection email goes out. The candidate never knows why. The company has no legal record of what happened.
 
@@ -26,7 +30,7 @@ Under India's **DPDP Act 2023** and the **EU AI Act**, this is no longer just un
 
 ## What AgentGuard Is
 
-AgentGuard v3 is **active transactional middleware** that sits between an AI hiring agent and the enterprise systems it controls. Every decision the AI tries to make must pass through AgentGuard before it executes.
+AgentGuard v3 is **runtime interception middleware**: it sits between autonomous AI/agent outputs and downstream execution surfaces (workflow engines, ticketing, candidate communications, lending orchestration, …). Every decision the AI tries to make must pass through AgentGuard before it executes.
 
 | ❌ This is NOT | ✅ This IS |
 |---|---|

@@ -225,6 +225,15 @@ def classify_risk(decision: dict) -> dict:
     proba = clf.predict_proba(X_input)[0]
     confidence_score = float(np.max(proba))
 
+    # Map class probabilities to human-readable labels.
+    # clf.classes_ are encoded labels; le.inverse_transform maps them to {"GREEN","YELLOW","RED"}.
+    try:
+        class_labels = list(le.inverse_transform(clf.classes_))
+    except Exception:
+        # Defensive fallback: assume fixed label order.
+        class_labels = ["GREEN", "YELLOW", "RED"]
+    class_probabilities = {lbl: float(proba[i]) for i, lbl in enumerate(class_labels)}
+
     # ── SHAP values ───────────────────────────────────────────────────────────
     # PermutationExplainer supports multi-class predict_proba callables.
     # Cache the explainer by model hash so it is only built once per process.
@@ -262,6 +271,8 @@ def classify_risk(decision: dict) -> dict:
     return {
         "risk_level": risk_level,
         "confidence_score": confidence_score,
+        "class_probabilities": class_probabilities,
+        "shap_explained_class": risk_level,
         "shap_scores": shap_scores,
         "model_version_hash": _load_hash(),
         "latency_ms": round(latency_ms, 3),

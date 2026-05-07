@@ -33,6 +33,7 @@ function mapEscalated(a: AgentGuardArtifact): TechCase | null {
   if (!a.escalation) return null
   const route = (a.routing_classification ?? 'RED') as 'RED' | 'YELLOW'
   const pairs = shapPairs(a)
+  const policyHardBlock = a.policy_result === 'BLOCK'
 
   return {
     id: a.decision_id,
@@ -40,7 +41,7 @@ function mapEscalated(a: AgentGuardArtifact): TechCase | null {
     candidate: a.candidate_name ?? a.candidate_id ?? 'Unknown',
     role: 'Applicant',
     routingClass: route === 'YELLOW' ? 'YELLOW' : 'RED',
-    policyRule: a.policy_rule_cited ?? 'NONE',
+    policyRule: policyHardBlock ? 'RED — Policy hard block' : (a.policy_rule_cited ?? 'NONE'),
     confidence:
       typeof a.confidence_score === 'number' ? a.confidence_score.toFixed(2) : '—',
     servicenowTicket: a.servicenow_ticket_id ?? undefined,
@@ -97,7 +98,7 @@ function ShapBar({ value }: { value: number }) {
   )
 }
 
-export default function TechReviewPage() {
+export function TechReviewInner({ embedded }: { embedded?: boolean } = {}) {
   const [cases, setCases] = useState<TechCase[]>([])
   const [techNotes, setTechNotes] = useState<Record<string, string>>({})
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -142,17 +143,21 @@ export default function TechReviewPage() {
   }
 
   return (
-    <AppShell>
-      <div className="flex items-center justify-between mb-7">
+    <>
+      <div className={`flex items-center justify-between ${embedded ? 'mb-4' : 'mb-7'}`}>
         <div>
-          <h1 className="font-sans font-semibold" style={{ fontSize: '22px', color: '#0D0D0D' }}>
-            Technical Review
-          </h1>
-          <p className="font-sans text-sm mt-1" style={{ color: '#6B6B6B' }}>
-            Cases with <span className="font-mono text-xs">escalation</span> and no{' '}
-            <span className="font-mono text-xs">tech_review</span> yet —{' '}
-            <span className="font-mono text-xs">{apiBase()}</span>
-          </p>
+          {!embedded && (
+            <>
+              <h1 className="font-sans font-semibold" style={{ fontSize: '22px', color: '#0D0D0D' }}>
+                Technical review lane
+              </h1>
+              <p className="font-sans text-sm mt-1" style={{ color: '#6B6B6B' }}>
+                Cases with <span className="font-mono text-xs">escalation</span> and no{' '}
+                <span className="font-mono text-xs">tech_review</span> yet —{' '}
+                <span className="font-mono text-xs">{apiBase()}</span>
+              </p>
+            </>
+          )}
           {err && (
             <p className="font-sans text-xs mt-2" style={{ color: '#B91C1C' }}>
               {err}
@@ -353,6 +358,14 @@ export default function TechReviewPage() {
           )
         })}
       </div>
+    </>
+  )
+}
+
+export default function TechReviewPage() {
+  return (
+    <AppShell>
+      <TechReviewInner />
     </AppShell>
   )
 }

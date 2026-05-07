@@ -161,7 +161,8 @@ function statusToDot(status: ReviewStatus): { color: 'green' | 'amber' | 'red' |
   }
 }
 
-export default function ReviewQueuePage() {
+/** Table + actions without app shell (for Incident Queue composition). */
+export function ReviewQueueInner({ embedded }: { embedded?: boolean } = {}) {
   const [rows, setRows] = useState<ReviewRow[]>([])
   const [loadErr, setLoadErr] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -241,16 +242,20 @@ export default function ReviewQueuePage() {
   }
 
   return (
-    <AppShell>
-      <div className="flex items-center justify-between mb-7">
+    <>
+      <div className={`flex items-center justify-between ${embedded ? 'mb-4' : 'mb-7'}`}>
         <div>
-          <h1 className="font-sans font-semibold" style={{ fontSize: '22px', color: '#0D0D0D' }}>
-            Review Queue
-          </h1>
-          <p className="font-sans text-sm mt-1" style={{ color: '#6B6B6B' }}>
-            Hydrated from <span className="font-mono text-xs">{apiBase()}</span>/artifacts/recent · Actions call
-            live REST endpoints
-          </p>
+          {!embedded && (
+            <>
+              <h1 className="font-sans font-semibold" style={{ fontSize: '22px', color: '#0D0D0D' }}>
+                Human oversight lane
+              </h1>
+              <p className="font-sans text-sm mt-1" style={{ color: '#6B6B6B' }}>
+                Hydrated from <span className="font-mono text-xs">{apiBase()}</span>/artifacts/recent · Actions call
+                live REST endpoints
+              </p>
+            </>
+          )}
           {loadErr && (
             <p className="font-sans text-xs mt-2" style={{ color: '#B91C1C' }}>
               {loadErr}{' '}
@@ -643,6 +648,14 @@ export default function ReviewQueuePage() {
           </tbody>
         </table>
       </div>
+    </>
+  )
+}
+
+export default function ReviewQueuePage() {
+  return (
+    <AppShell>
+      <ReviewQueueInner />
     </AppShell>
   )
 }

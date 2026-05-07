@@ -1,6 +1,7 @@
 import os
 import json
-import random
+from typing import Optional
+
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -26,7 +27,10 @@ def generate_llm_response(prompt: str) -> str:
     except Exception as e:
         raise ValueError(f"LLM request failed: {e}")
 
-def make_hiring_decision(candidate: dict) -> dict:
+def make_hiring_decision(
+    candidate: dict,
+    inject_prohibited_feature: Optional[str] = None,
+) -> dict:
     prompt = (
         "You are an AI hiring screener. Evaluate the given candidate profile and make a hiring decision.\n"
         "Return ONLY valid JSON. No explanation. No extra text.\n"
@@ -60,15 +64,12 @@ def make_hiring_decision(candidate: dict) -> dict:
     if not isinstance(decision_data, dict) or not required_fields.issubset(decision_data.keys()):
         raise ValueError("Invalid response format")
         
-    if random.random() < 0.30:
-        biased_features = ["emotion_score", "institution_tier", "applicant_surname", "home_district"]
-        injected_feature = random.choice(biased_features)
-        if isinstance(decision_data.get("features_used"), list):
-            if injected_feature not in decision_data["features_used"]:
-                decision_data["features_used"].append(injected_feature)
-        else:
-            decision_data["features_used"] = [injected_feature]
-            
+    if inject_prohibited_feature:
+        if not isinstance(decision_data.get("features_used"), list):
+            decision_data["features_used"] = []
+        if inject_prohibited_feature not in decision_data["features_used"]:
+            decision_data["features_used"].append(inject_prohibited_feature)
+
     return decision_data
 
 if __name__ == "__main__":

@@ -14,6 +14,8 @@ Regulations covered:
 
 from __future__ import annotations
 
+from typing import Any, Optional
+
 # ---------------------------------------------------------------------------
 # Policy Rule Registry
 # ---------------------------------------------------------------------------
@@ -71,16 +73,66 @@ _INJECTION_PATTERNS: tuple[str, ...] = (
 # Core Policy Check
 # ---------------------------------------------------------------------------
 
-def check_policy(decision: dict, raw_input: str = "") -> dict:
+def _merge_provenance_features(
+    features_used: list[str],
+    canonical_inputs: Optional[dict[str, Any]],
+) -> set[str]:
+    """
+    Combine agent-declared ``features_used`` with features implied by observable
+    input fields (provenance-aware governance).
+    """
+    merged: set[str] = set(features_used)
+
+    if not canonical_inputs:
+        return merged
+
+    # Ignore internal Scenario Lab keys
+    cand = {
+        k: v
+        for k, v in canonical_inputs.items()
+        if not str(k).startswith("_")
+    }
+
+    if cand.get("emotion_score") is not None:
+        merged.add("emotion_score")
+
+    if cand.get("applicant_surname") not in (None, ""):
+        merged.add("applicant_surname")
+
+    if cand.get("institution_tier") is not None:
+        merged.add("institution_tier")
+
+    if cand.get("home_district") not in (None, ""):
+        merged.add("home_district")
+
+    if cand.get("village_code") not in (None, ""):
+        merged.add("village_code")
+
+    # Maternity-proxy rule consumes applicant_gender; map API ``gender`` field.
+    gap = cand.get("career_gap_months")
+    gender_val = cand.get("gender") or cand.get("applicant_gender")
+    if gap is not None and gender_val not in (None, ""):
+        merged.add("career_gap_months")
+        merged.add("applicant_gender")
+
+    return merged
+
+
+def check_policy(
+    decision: dict,
+    raw_input: str = "",
+    canonical_inputs: Optional[dict[str, Any]] = None,
+) -> dict:
     """
     Evaluate a hiring decision against all AgentGuard policy rules.
 
     Args:
-        decision:   A dict representing the AI hiring decision. Must contain a
-                    ``features_used`` key (list[str]) listing every feature the
-                    AI model referenced.
-        raw_input:  The raw, unprocessed candidate-supplied text (CV, cover
-                    letter, free-text field, etc.).  Defaults to empty string.
+        decision:   Agent output; must expose ``features_used`` (claims).
+        raw_input:  Raw subject text scanned for injection patterns.
+        canonical_inputs:
+                    Structured ingress body (validated subject profile). Used to
+                    detect prohibited modalities present in inputs independent
+                    of what the upstream model admits in ``features_used``.
 
     Returns:
         A dict with the following keys:
@@ -91,8 +143,16 @@ def check_policy(decision: dict, raw_input: str = "") -> dict:
 
     Performance guarantee: pure Python dict/set operations; runs in < 5 ms.
     """
-    features_used: list[str] = decision.get("features_used", [])
-    features_set: set[str] = set(features_used)          # O(1) lookups
+    claimed: list[str] = decision.get("features_used", [])
+    if not isinstance(claimed, list):
+        claimed = []
+
+    ci = (
+        canonical_inputs
+        if isinstance(canonical_inputs, dict)
+        else None
+    )
+    features_set: set[str] = _merge_provenance_features(claimed, ci)
     raw_lower: str = raw_input.lower()
 
     violations: list[dict] = []

@@ -1,6 +1,7 @@
 /** Saved compliance artifact (subset of fields the UI uses). */
 export interface AgentGuardArtifact {
   decision_id: string
+  trace_id?: string
   timestamp: string
   candidate_id?: string | null
   candidate_name?: string | null
@@ -25,6 +26,7 @@ export interface AgentGuardArtifact {
     reviewer_id: string
     note: string
     escalated_at?: string
+    top_shap_drivers?: string[]
   }
   tech_review?: {
     decision: string
@@ -67,4 +69,6 @@ export interface CandidatePayload {
   home_district?: string | null
   village_code?: string | null
   emotion_score?: number | null
+  /** Scenario Lab: force a prohibited feature into agent claims (policy demo only). */
+  scenario_demo_inject_feature?: string | null
 }

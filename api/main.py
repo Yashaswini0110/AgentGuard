@@ -27,15 +27,12 @@ import json
 import logging
 import os
 import time
-from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
-import time as _agent_time
-from pathlib import Path as _AgentPath
 
 # ---------------------------------------------------------------------------
 # Core pipeline imports
@@ -44,12 +41,11 @@ import sys
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from core.worker_agent import make_hiring_decision
-from core.policy_engine import check_policy
-from core.risk_router import classify_risk, check_drift
-from core.supervisor import semantic_review
-from core.servicenow import create_incident_with_fallback
-from core.artifact_engine import generate_artifact, save_artifact, export_for_regulator
+from api.pipeline import run_candidate_pipeline
+from api.storage import ARTIFACTS_DIR, artifact_path, load_artifact, write_artifact_file
+from api.v2.routes import router as v2_router
+from core.artifact_engine import export_for_regulator, verify_artifact
+from core.risk_router import check_drift
 from core.resume_parser import extract_text_from_pdf, parse_resume
 
 # ---------------------------------------------------------------------------
@@ -68,13 +64,14 @@ logger = logging.getLogger("agentguard.api")
 app = FastAPI(
     title="AgentGuard v3",
     description=(
-        "AI Governance Platform — full pipeline: "
-        "worker_agent → policy_engine → risk_router → supervisor → servicenow → artifact_engine"
+        "Runtime governance control plane — pre-execution evaluation, traceable artifacts, oversight hooks."
     ),
-    version="3.1",
+    version="3.2",
     docs_url="/docs",
     redoc_url="/redoc",
 )
+
+app.include_router(v2_router, prefix="/v2", tags=["v2"])
 
 # ---------------------------------------------------------------------------
 # CORS — allow all origins (required for Streamlit frontend)
@@ -125,6 +122,10 @@ class CandidateInput(BaseModel):
     home_district: Optional[str] = Field(None)
     village_code: Optional[str] = Field(None)
     emotion_score: Optional[float] = Field(None, ge=0.0, le=1.0)
+    scenario_demo_inject_feature: Optional[str] = Field(
+        None,
+        description="Scenario Lab only — append a prohibited feature name to the agent claims for policy demos.",
+    )
 
 
 class HumanReviewInput(BaseModel):
@@ -145,203 +146,30 @@ class TechReviewInput(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Artifact directory helper
-# ---------------------------------------------------------------------------
-ARTIFACTS_DIR = Path("artifacts")
-_AGENT_LOG_PATH = str(_AgentPath(__file__).resolve().parents[1] / "debug-924df7.log")
-
-# #region agent log
-# Create a single boot log line to prove logging works (no secrets).
-try:
-    payload = {
-        "sessionId": "924df7",
-        "runId": "pre-fix",
-        "hypothesisId": "H0",
-        "location": "api/main.py:module_init",
-        "message": "API module imported",
-        "data": {"cwd": os.getcwd(), "log_path": _AGENT_LOG_PATH},
-        "timestamp": int(_agent_time.time() * 1000),
-    }
-    with open(_AGENT_LOG_PATH, "a", encoding="utf-8") as f:
-        f.write(json.dumps(payload) + "\n")
-except Exception:
-    pass
-# #endregion
-
-
-def _artifact_path(decision_id: str) -> Path:
-    return ARTIFACTS_DIR / f"{decision_id}.json"
-
-
-def _load_artifact(decision_id: str) -> dict:
-    path = _artifact_path(decision_id)
-    if not path.exists():
-        raise HTTPException(status_code=404, detail=f"Artifact '{decision_id}' not found.")
-    with open(path, encoding="utf-8") as fh:
-        return json.load(fh)
-
-
-def _write_artifact_file(artifact: dict) -> None:
-    path = _artifact_path(artifact["decision_id"])
-    with open(path, "w", encoding="utf-8") as fh:
-        json.dump(artifact, fh, indent=2, sort_keys=True)
-
-
-# ---------------------------------------------------------------------------
 # Endpoint 1: POST /decision — full governance pipeline
 # ---------------------------------------------------------------------------
 
-@app.post("/decision", summary="Run the full AgentGuard governance pipeline")
+@app.post("/decision", summary="Run the full AgentGuard governance pipeline (v1 shim)")
 async def run_decision(candidate_input: CandidateInput):
     """
-    Execute the complete pipeline for one candidate:
+    Execute :func:`run_candidate_pipeline` for a structured subject profile.
 
-    1. **worker_agent** → AI hiring decision
-    2. **policy_engine** → hard-rule governance check
-    3. **risk_router** → GREEN / YELLOW / RED classification (skipped on BLOCK)
-    4. **supervisor** → semantic bias review (YELLOW only)
-    5. **servicenow** → incident ticket (RED only)
-    6. **artifact_engine** → signed compliance artifact
+    Maps ``scenario_demo_inject_feature`` to the Scenario Lab shim key internally.
+    Prefer ``POST /v2/evaluate`` for new integrations.
     """
-    pipeline_start = time.perf_counter()
-
-    candidate: dict = candidate_input.model_dump()
-
-    # ── Step 1: Worker agent ────────────────────────────────────────────────
+    candidate = candidate_input.model_dump()
+    inj = candidate.pop("scenario_demo_inject_feature", None)
+    if inj:
+        candidate["_scenario_demo_inject_feature"] = inj
     try:
-        decision: dict = make_hiring_decision(candidate)
-    except Exception as exc:
-        logger.error("worker_agent failed: %s", exc)
-        raise HTTPException(status_code=502, detail=f"Worker agent error: {exc}")
-
-    # Enrich decision with candidate_name for artifact
-    decision.setdefault("candidate_name", candidate.get("name"))
-
-    # ── Step 2: Policy engine ───────────────────────────────────────────────
-    try:
-        policy_result: dict = check_policy(decision, raw_input=str(candidate))
-    except Exception as exc:
-        logger.error("policy_engine failed: %s", exc)
-        raise HTTPException(status_code=502, detail=f"Policy engine error: {exc}")
-
-    policy_blocked: bool = policy_result.get("recommended_action") == "BLOCK"
-
-    # ── Step 3: Risk router (only when policy passes) ───────────────────────
-    router_result: dict = {}
-    classification: str = "RED"  # default if policy blocked
-
-    if not policy_blocked:
-        # Build the feature dict that classify_risk expects
-        router_input: dict = {
-            "years_of_experience": candidate.get("years_of_experience", 0),
-            "skill_match_score":   candidate.get("skill_match_score", 0.0),
-            "interview_score":     candidate.get("interview_score", 0.0),
-            "assessment_score":    candidate.get("assessment_score", 0.0),
-            "decision_confidence": decision.get("confidence", 0.5),
-            "feature_count":       len(decision.get("features_used", [])),
-        }
-        try:
-            router_result = classify_risk(router_input)
-            classification = router_result.get("risk_level", "RED")
-        except Exception as exc:
-            logger.error("risk_router failed: %s", exc)
-            # Treat as RED on error
-            router_result = {
-                "risk_level": "RED",
-                "confidence_score": 0.0,
-                "shap_scores": {},
-                "model_version_hash": "unknown",
-                "latency_ms": 0.0,
-                "error": str(exc),
-            }
-            classification = "RED"
-
-    # Normalise router_result keys for downstream consumers
-    # (artifact_engine reads routing_classification, confidence_score, shap_scores)
-    normalised_router: dict = {
-        "routing_classification": router_result.get("risk_level", classification),
-        "confidence_score":       router_result.get("confidence_score", 0.0),
-        "shap_scores":            router_result.get("shap_scores", {}),
-        "model_version_hash":     router_result.get("model_version_hash", "unknown"),
-    }
-    if policy_blocked:
-        normalised_router["routing_classification"] = "RED"
-
-    # ── Step 4: Supervisor semantic review (YELLOW only) ────────────────────
-    supervisor_result: Optional[dict] = None
-    if classification == "YELLOW":
-        try:
-            supervisor_result = semantic_review(decision, router_result)
-        except Exception as exc:
-            logger.error("supervisor failed: %s", exc)
-            supervisor_result = {
-                "supervisor_verdict": "ESCALATE_TO_HUMAN",
-                "bias_detected": True,
-                "bias_reason": f"Supervisor unavailable: {exc}",
-                "confidence": 0.0,
-                "features_flagged": [],
-            }
-
-    # ── Step 5: ServiceNow incident (RED path) ──────────────────────────────
-    servicenow_result: Optional[dict] = None
-    ticket_id: Optional[str] = None
-
-    is_red = classification == "RED" or policy_blocked
-    if is_red:
-        try:
-            servicenow_result = create_incident_with_fallback(
-                decision,
-                policy_result,
-                normalised_router,
-            )
-            ticket_id = servicenow_result.get("ticket_id")
-        except Exception as exc:
-            logger.error("servicenow failed: %s", exc)
-            servicenow_result = {
-                "ticket_id": None,
-                "status": "ERROR",
-                "url": None,
-                "error": str(exc),
-            }
-
-    # ── Step 6: Artifact engine ─────────────────────────────────────────────
-    try:
-        artifact: dict = generate_artifact(
-            decision=decision,
-            policy_result=policy_result,
-            router_result=normalised_router,
-            servicenow_ticket_id=ticket_id,
-            supervisor_result=supervisor_result,
-        )
-        artifact_path: str = save_artifact(artifact)
-    except Exception as exc:
-        logger.error("artifact_engine failed: %s", exc)
-        raise HTTPException(status_code=500, detail=f"Artifact engine error: {exc}")
-
-    # ── Total latency ────────────────────────────────────────────────────────
-    total_latency_ms: float = round((time.perf_counter() - pipeline_start) * 1000, 2)
-
-    logger.info(
-        "Pipeline complete | decision_id=%s | classification=%s | latency=%.1fms",
-        artifact["decision_id"],
-        classification,
-        total_latency_ms,
-    )
-
-    # ── Response ─────────────────────────────────────────────────────────────
-    return {
-        "decision_id":       artifact["decision_id"],
-        "classification":    classification,
-        "policy_blocked":    policy_blocked,
-        "decision":          decision,
-        "policy_result":     policy_result,
-        "router_result":     router_result,
-        "supervisor_result": supervisor_result,
-        "servicenow_result": servicenow_result,
-        "artifact":          artifact,
-        "artifact_path":     artifact_path,
-        "total_latency_ms":  total_latency_ms,
-    }
+        return run_candidate_pipeline(candidate)
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    except Exception as exc:  # noqa: BLE001
+        logger.error("pipeline failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 # ---------------------------------------------------------------------------
@@ -351,7 +179,7 @@ async def run_decision(candidate_input: CandidateInput):
 @app.get("/health", summary="Liveness probe")
 async def health():
     """Returns service status and API version."""
-    return {"status": "ok", "version": "3.1"}
+    return {"status": "ok", "version": "3.2"}
 
 
 # ---------------------------------------------------------------------------
@@ -379,7 +207,7 @@ async def get_decision(decision_id: str):
     Load and return the compliance artifact JSON for the given decision_id.
     Returns 404 if the artifact does not exist.
     """
-    artifact = _load_artifact(decision_id)
+    artifact = load_artifact(decision_id)
     return artifact
 
 
@@ -388,7 +216,7 @@ async def get_decision_export(decision_id: str):
     """
     Returns a regulator-ready export string (header comment block + JSON).
     """
-    artifact = _load_artifact(decision_id)
+    artifact = load_artifact(decision_id)
     return PlainTextResponse(export_for_regulator(artifact))
 
 
@@ -404,34 +232,6 @@ async def resume_parse(
     if file.content_type not in ("application/pdf", "application/x-pdf"):
         raise HTTPException(status_code=415, detail="Only PDF files are supported.")
     try:
-        # #region agent log
-        # NOTE: Do not log secrets (API keys) or resume/JD contents.
-        try:
-            k_raw = os.getenv("GOOGLE_API_KEY")
-            k = (k_raw or "").strip()
-            payload = {
-                "sessionId": "924df7",
-                "runId": "pre-fix",
-                "hypothesisId": "H2",
-                "location": "api/main.py:resume_parse:entry",
-                "message": "Resume parse request received",
-                "data": {
-                    "content_type": file.content_type,
-                    "filename_present": bool(file.filename),
-                    "job_description_len": len(job_description or ""),
-                    "google_api_key_present": bool(k_raw),
-                    "google_api_key_len": len(k),
-                    "gemini_api_key_present": bool((os.getenv("GEMINI_API_KEY") or "").strip()),
-                    "selected_key_source": ("GOOGLE_API_KEY" if k else ("GEMINI_API_KEY" if (os.getenv("GEMINI_API_KEY") or "").strip() else "NONE")),
-                },
-                "timestamp": int(_agent_time.time() * 1000),
-            }
-            with open(_AGENT_LOG_PATH, "a", encoding="utf-8") as f:
-                f.write(json.dumps(payload) + "\n")
-        except Exception:
-            pass
-        # #endregion
-
         pdf_bytes = await file.read()
         text = extract_text_from_pdf(pdf_bytes)
         if not text.strip():
@@ -467,6 +267,15 @@ async def artifacts_recent(limit: int = 50):
         except Exception:
             pass
     return {"count": len(artifacts), "artifacts": artifacts}
+
+
+@app.post("/artifacts/{decision_id}/verify", summary="Verify artifact integrity (SHA-256)")
+async def verify_artifact_endpoint(decision_id: str):
+    path = artifact_path(decision_id)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"Artifact '{decision_id}' not found.")
+    ok = verify_artifact(str(path.resolve()))
+    return {"decision_id": decision_id, "integrity_verified": ok}
 
 
 # ---------------------------------------------------------------------------
@@ -515,7 +324,7 @@ async def human_review(decision_id: str, body: HumanReviewInput):
     The artifact's ``human_review`` field is added / overwritten.
     Returns the updated artifact.
     """
-    artifact = _load_artifact(decision_id)
+    artifact = load_artifact(decision_id)
 
     artifact["human_review"] = {
         "action":      body.action,
@@ -524,7 +333,7 @@ async def human_review(decision_id: str, body: HumanReviewInput):
         "reviewed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }
 
-    _write_artifact_file(artifact)
+    write_artifact_file(artifact)
     logger.info(
         "Human review recorded | decision_id=%s | action=%s | reviewer=%s",
         decision_id,
@@ -538,13 +347,21 @@ async def human_review(decision_id: str, body: HumanReviewInput):
 @app.post("/escalate/{decision_id}", summary="HR escalation to technical review")
 async def escalate_to_tech(decision_id: str, body: EscalateInput):
     """Record an HR escalation note on the artifact (for the Tech Review queue)."""
-    artifact = _load_artifact(decision_id)
+    artifact = load_artifact(decision_id)
+    shap = artifact.get("shap_scores") or {}
+    top = sorted(
+        ((k, float(v)) for k, v in shap.items()),
+        key=lambda kv: abs(kv[1]),
+        reverse=True,
+    )[:3]
+    top_drivers = [k for k, _ in top]
     artifact["escalation"] = {
         "reviewer_id": body.reviewer_id,
         "note": body.note,
         "escalated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "top_shap_drivers": top_drivers,
     }
-    _write_artifact_file(artifact)
+    write_artifact_file(artifact)
     logger.info("Escalation recorded | decision_id=%s | reviewer=%s", decision_id, body.reviewer_id)
     return {"message": "Escalation recorded.", "artifact": artifact}
 
@@ -552,14 +369,14 @@ async def escalate_to_tech(decision_id: str, body: EscalateInput):
 @app.post("/tech-review/{decision_id}", summary="Technical reviewer ACCEPT / REJECT")
 async def tech_review(decision_id: str, body: TechReviewInput):
     """Persist technical review outcome on the artifact (for shortlist workflow)."""
-    artifact = _load_artifact(decision_id)
+    artifact = load_artifact(decision_id)
     artifact["tech_review"] = {
         "decision": body.action,
         "reviewer_id": body.reviewer_id,
         "note": body.note,
         "reviewed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }
-    _write_artifact_file(artifact)
+    write_artifact_file(artifact)
     logger.info(
         "Tech review recorded | decision_id=%s | action=%s | reviewer=%s",
         decision_id,

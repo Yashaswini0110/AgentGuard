@@ -42,13 +42,35 @@ def _build_description(
     candidate_name = decision.get("candidate_name", "N/A")
     timestamp      = decision.get("timestamp", datetime.datetime.utcnow().isoformat() + "Z")
 
-    rule_name      = policy_result.get("rule_fired", "UNKNOWN_RULE")
-    regulation_ref = policy_result.get("regulation_reference", "N/A")
-    features_used  = policy_result.get("features_used", [])
+    violations     = policy_result.get("violations") or []
+    first_viol     = violations[0] if violations else {}
+    rule_name      = first_viol.get(
+        "rule_name",
+        policy_result.get("rule_fired", "NONE"),
+    )
+    regulation_ref = first_viol.get(
+        "regulation",
+        policy_result.get("regulation_reference", "N/A"),
+    )
 
-    classification = router_result.get("classification", "RED")
-    confidence     = router_result.get("confidence", 0.0)
-    shap_scores    = router_result.get("shap_scores", {})
+    fu = decision.get("features_used")
+    if isinstance(fu, list):
+        features_used = fu
+    elif isinstance(fu, dict):
+        features_used = list(fu.keys())
+    else:
+        features_used = []
+
+    classification = (
+        router_result.get("routing_classification")
+        or router_result.get("risk_level")
+        or router_result.get("classification", "RED")
+    )
+    confidence = float(
+        router_result.get("confidence_score") if router_result.get("confidence_score") is not None
+        else router_result.get("confidence", 0.0)
+    )
+    shap_scores    = router_result.get("shap_scores") or {}
 
     # Top 3 SHAP features by absolute value
     top_shap = sorted(
@@ -63,31 +85,30 @@ def _build_description(
     features_line = ", ".join(str(f) for f in features_used) if features_used else "N/A"
 
     description = f"""
-=== AgentGuard v3 — RED Flag Incident Report ===
+=== AgentGovernance — Elevated Incident (RED) ===
 
-CANDIDATE INFORMATION
-  Candidate ID   : {candidate_id}
-  Candidate Name : {candidate_name}
+SUBJECT INFORMATION
+  Subject ID       : {candidate_id}
+  Display Name    : {candidate_name}
 
-POLICY VIOLATION
-  Rule Fired           : {rule_name}
-  Regulation Reference : {regulation_ref}
-  Features Used by AI  : {features_line}
+POLICY LAYER OUTCOME
+  Primary Rule     : {rule_name}
+  Regulation Ref   : {regulation_ref}
+  Claimed Features : {features_line}
 
-SHAP EXPLAINABILITY (Top 3 Features by |SHAP|)
+EXPLAINABILITY (Top SHAP Drivers)
 {shap_lines}
 
-RISK ROUTER RESULT
-  Classification  : {classification}
-  Confidence      : {confidence:.2%}
+RISK ROUTER OUTCOME
+  Risk Tier       : {classification}
+  Confidence      : {confidence:.4f}
 
-INCIDENT METADATA
+AUDIT METADATA
   Timestamp (UTC) : {timestamp}
-  System          : AgentGuard v3 AI Governance Platform
+  System           : AgentGuard Governance Control Plane
 
 ACTION REQUIRED
-  An HR officer must review this decision before it is released.
-  The candidate decision remains in PENDING state until resolved.
+  Investigate downstream release risk and reconcile with oversight procedures.
 """.strip()
 
     return description
@@ -101,15 +122,16 @@ def _build_payload(
     """Build the ServiceNow Table API incident payload."""
 
     candidate_id = decision.get("candidate_id", "UNKNOWN")
-    rule_name    = policy_result.get("rule_fired", "UNKNOWN_RULE")
+    violations_v = policy_result.get("violations") or []
+    rn = (violations_v[0].get("rule_name") if violations_v else policy_result.get("rule_fired")) or "POLICY_EVALUATED"
 
     return {
         "short_description": (
-            f"AgentGuard RED Flag: Candidate {candidate_id} \u2014 {rule_name}"
+            f"AgentGuard RED: subject {candidate_id} \u2014 {rn}"
         ),
         "description"  : _build_description(decision, policy_result, router_result),
         "category"     : "AI Governance",
-        "subcategory"  : "Hiring Decision Review",
+        "subcategory"  : "Governed AI Action Review",
         "priority"     : "2",   # High
         "urgency"      : "2",
         "impact"       : "2",
