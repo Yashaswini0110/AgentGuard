@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import AppShell from '@/components/AppShell'
+import { ResumeViewer } from '@/components/ResumeViewer'
 import { apiBase, fetchRecentArtifacts, postTechReview } from '@/lib/api'
 import {
   formatArtifactTime,
@@ -102,6 +103,7 @@ export default function TechReviewPage() {
   const [techNotes, setTechNotes] = useState<Record<string, string>>({})
   const [busyId, setBusyId] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [resumeViewer, setResumeViewer] = useState<{ decisionId: string; candidate: string } | null>(null)
 
   const reload = useCallback(async () => {
     setErr(null)
@@ -309,6 +311,19 @@ export default function TechReviewPage() {
               <div className="mt-4 pt-4 flex items-center gap-3" style={{ borderTop: '1px solid #E4E2DC' }}>
                 <button
                   type="button"
+                  onClick={() => setResumeViewer({ decisionId: c.decisionId, candidate: c.candidate })}
+                  className="font-sans text-sm font-medium px-4 py-2.5 rounded-lg transition-opacity hover:opacity-90"
+                  style={{
+                    border: '1px solid #0D6EFD',
+                    color: '#0D6EFD',
+                    background: 'none',
+                    cursor: 'pointer',
+                  }}
+                >
+                  View Resume
+                </button>
+                <button
+                  type="button"
                   onClick={() => void persistTech(c.id, 'ACCEPT')}
                   disabled={isBusy}
                   className="font-sans text-sm font-medium px-5 py-2.5 rounded-lg transition-opacity hover:opacity-90"
@@ -353,6 +368,14 @@ export default function TechReviewPage() {
           )
         })}
       </div>
+
+      {resumeViewer && (
+        <ResumeViewer
+          decisionId={resumeViewer.decisionId}
+          candidateName={resumeViewer.candidate}
+          onClose={() => setResumeViewer(null)}
+        />
+      )}
     </AppShell>
   )
 }

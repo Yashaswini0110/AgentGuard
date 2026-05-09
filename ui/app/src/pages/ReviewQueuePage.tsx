@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router'
 import AppShell from '@/components/AppShell'
 import { StatusDot } from '@/components/StatusDot'
+import { ResumeViewer } from '@/components/ResumeViewer'
 import { apiBase, fetchRecentArtifacts, postEscalate, postHumanReview } from '@/lib/api'
 import {
   artifactHrRowStatus,
@@ -178,6 +179,7 @@ export default function ReviewQueuePage() {
     type: 'approve' | 'escalate' | 'reject'
     note: string
   } | null>(null)
+  const [resumeViewer, setResumeViewer] = useState<{ decisionId: string; candidate: string } | null>(null)
 
   const reload = useCallback(async () => {
     setLoadErr(null)
@@ -545,6 +547,17 @@ export default function ReviewQueuePage() {
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation()
+                              setResumeViewer({ decisionId: row.decisionId, candidate: row.candidate })
+                            }}
+                            className="font-sans text-xs font-medium px-2 py-1 rounded"
+                            style={{ border: '1px solid #0D6EFD', color: '#0D6EFD', background: 'none', cursor: 'pointer' }}
+                          >
+                            View Resume
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
                               setActionState({ id: row.id, type: 'approve', note: '' })
                             }}
                             className="font-sans text-xs font-medium px-2 py-1 rounded"
@@ -676,6 +689,14 @@ export default function ReviewQueuePage() {
           </tbody>
         </table>
       </div>
+
+      {resumeViewer && (
+        <ResumeViewer
+          decisionId={resumeViewer.decisionId}
+          candidateName={resumeViewer.candidate}
+          onClose={() => setResumeViewer(null)}
+        />
+      )}
     </AppShell>
   )
 }

@@ -187,3 +187,33 @@ export async function postResumeParse(file: File, jobDescription: string) {
   }
   return (await res.json()) as Record<string, unknown>
 }
+
+export interface ResumeUrlResponse {
+  url: string
+  original_name: string
+  mime_type: string
+  file_size_bytes: number
+  sha256_hash: string
+  expires_in: number
+}
+
+/**
+ * Fetch a short-lived signed URL for a candidate's resume so the dashboard
+ * can render it inline inside an <iframe>. Backend mints a fresh URL each
+ * call (default 5-minute TTL via Supabase Storage).
+ *
+ * Throws a friendly Error on 404 (resume never uploaded) so callers can
+ * surface "Resume not available" without inspecting status codes.
+ */
+export async function fetchResumeUrl(decisionId: string): Promise<ResumeUrlResponse> {
+  const url = joinUrl(apiBase(), `/resumes/${encodeURIComponent(decisionId)}/url`)
+  const res = await fetch(url, { headers: { Accept: 'application/json' } })
+  if (!res.ok) {
+    if (res.status === 404) {
+      throw new Error('Resume not available for this candidate (was not uploaded to Supabase).')
+    }
+    const text = await res.text().catch(() => '')
+    throw new Error(`HTTP ${res.status} ${res.statusText}${text ? ` — ${text}` : ''}`)
+  }
+  return (await res.json()) as ResumeUrlResponse
+}

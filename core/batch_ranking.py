@@ -30,6 +30,7 @@ from core.job_match_scores import composite_match_scores
 from core.artifact_engine import generate_artifact, save_artifact
 from core.policy_engine import evaluate_pool_quota_rule
 from core.sync_pipeline import sync_governance_pipeline
+from core.supabase_storage import upload_resume
 
 logger = logging.getLogger("agentguard.batch")
 
@@ -301,6 +302,34 @@ async def process_single_resume_candidate(
             "_classification": "REJECT",
             "_classification_reason": f"Governance pipeline error — not rankable: {exc}",
         }
+
+    # Best-effort: persist the original resume bytes to Supabase Storage so HR /
+    # Tech reviewers can open the actual PDF from the dashboard. Failure here
+    # must NOT break the governance result — the artifact and classification
+    # are already valid; only the "View Resume" button would be unavailable.
+    decision_id_for_upload = gov.get("decision_id") if isinstance(gov, dict) else None
+    if decision_id_for_upload:
+        try:
+            mime = (
+                "application/pdf"
+                if rel_path.lower().endswith(".pdf")
+                else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
+            await _run_in_thread(
+                upload_resume,
+                decision_id=decision_id_for_upload,
+                raw_bytes=raw_bytes,
+                original_name=Path(rel_path).name,
+                candidate_id=cid,
+                mime_type=mime,
+            )
+        except Exception as exc:
+            logger.warning(
+                "supabase_upload_failed decision_id=%s file=%s err=%s",
+                decision_id_for_upload,
+                rel_path,
+                exc,
+            )
 
     classification = gov.get("classification") or ""
     policy_blocked = bool(gov.get("policy_blocked"))

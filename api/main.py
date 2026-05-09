@@ -52,6 +52,7 @@ from core.sync_pipeline import sync_governance_pipeline
 from core.artifact_engine import export_for_regulator
 from core.resume_parser import extract_text_from_pdf, parse_resume
 from core.batch_ranking import execute_batch_zip_ranking_async
+from core.supabase_storage import get_signed_resume_url
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -372,6 +373,31 @@ async def get_decision_export(decision_id: str):
     """
     artifact = _load_artifact(decision_id)
     return PlainTextResponse(export_for_regulator(artifact))
+
+
+@app.get("/resumes/{decision_id}/url", summary="Signed URL for inline resume view")
+async def resume_signed_url(decision_id: str):
+    """
+    Mint a short-lived (default 5-minute) Supabase signed URL pointing at the
+    candidate's original resume.
+
+    The URL is created with `download=False`, so Supabase Storage serves the
+    object with `Content-Disposition: inline` and modern browsers render the
+    PDF natively inside an <iframe> — no local download, no FastAPI byte
+    proxying.
+
+    404 is returned when the resume was never persisted (typically because
+    the decision pre-dates Supabase integration, or the upload failed silently
+    during the governance run — see `supabase_upload_failed` warnings in logs).
+    """
+    try:
+        info = get_signed_resume_url(decision_id, expires_in=300)
+    except Exception as exc:
+        logger.error("resume_signed_url_failed decision_id=%s err=%s", decision_id, exc)
+        raise HTTPException(status_code=502, detail=f"Resume lookup failed: {exc}")
+    if not info:
+        raise HTTPException(status_code=404, detail="Resume not available for this decision.")
+    return info
 
 
 @app.post("/resume/parse", summary="Parse PDF resume against a job description")
