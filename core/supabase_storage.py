@@ -35,6 +35,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+from pathlib import Path
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -112,6 +113,48 @@ def upload_resume(
         storage_path,
     )
     return row
+
+
+def download_resume_bytes(decision_id: str) -> Optional[tuple[bytes, str, str]]:
+    """
+    Fetch raw resume bytes from Storage for server-side parsing (reviewer summaries, etc.).
+    Returns (raw_bytes, mime_type, original_name) or None if not found / misconfigured.
+    """
+    try:
+        client = _get_client()
+    except RuntimeError:
+        return None
+
+    res = (
+        client.table("candidate_files")
+        .select("*")
+        .eq("decision_id", decision_id)
+        .limit(1)
+        .execute()
+    )
+    if not res.data:
+        return None
+
+    row = res.data[0]
+    storage_path = row["storage_path"]
+    mime_type = row.get("mime_type") or "application/pdf"
+    original_name = row.get("original_name") or Path(storage_path).name
+
+    file_bytes = client.storage.from_(_BUCKET).download(storage_path)
+    if file_bytes is None:
+        return None
+    if not isinstance(file_bytes, (bytes, bytearray)):
+        logger.warning("unexpected_download_type decision_id=%s type=%s", decision_id, type(file_bytes))
+        return None
+    body = bytes(file_bytes)
+
+    logger.info(
+        "supabase_resume_downloaded decision_id=%s bytes=%d path=%s",
+        decision_id,
+        len(body),
+        storage_path,
+    )
+    return (body, mime_type, original_name)
 
 
 def get_signed_resume_url(decision_id: str, expires_in: int = 300) -> Optional[dict]:

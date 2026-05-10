@@ -223,13 +223,14 @@ def parse_resume(resume_text: str, job_description: str) -> dict:
             f"RESUME TEXT:\n-------------------\n{resume_text}\n-------------------"
         )
         
+        max_out = int((os.getenv("AG_RESUME_PARSE_MAX_TOKENS") or "4096").strip() or "4096")
         return chat_json(
             system=SYSTEM_PROMPT,
             user=user_content,
             gemini_model=(os.getenv("AG_GEMINI_MODEL_PARSE") or "gemini-2.5-flash").strip(),
             openrouter_model=(os.getenv("AG_OPENROUTER_MODEL") or "openai/gpt-oss-120b").strip(),
             temperature=0.0,
-            max_tokens=800,
+            max_tokens=max_out,
             retries=2,
         )
     except Exception as e:

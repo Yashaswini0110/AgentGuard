@@ -15,6 +15,7 @@ import {
 } from '@/lib/artifactHelpers'
 import type { AgentGuardArtifact } from '@/types/agentguard'
 import { useDemoAuth } from '@/contexts/DemoAuthContext'
+import TechReviewerSummaryPanel from '@/components/TechReviewerSummaryPanel'
 
 type ReviewStatus =
   | 'BLOCKED'
@@ -633,6 +634,16 @@ export default function ReviewQueuePage() {
                                   </div>
                                 ))}
                               </div>
+
+                              {String(row.routingClass || '')
+                                .trim()
+                                .toUpperCase() !== 'GREEN' && (
+                                <TechReviewerSummaryPanel
+                                  key={row.decisionId}
+                                  decisionId={row.decisionId}
+                                  routingClassification={row.routingClass}
+                                />
+                              )}
 
                               <div className="mt-4 flex items-center gap-3">
                                 <button

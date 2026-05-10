@@ -18,6 +18,7 @@ POST   /human-review/{decision_id} Record a human APPROVE / REJECT action.
 GET    /artifacts/recent           Recent saved artifacts (full JSON).
 POST   /escalate/{decision_id}     HR escalation to tech review.
 POST   /tech-review/{decision_id} Tech reviewer ACCEPT / REJECT.
+POST   /reviewer-summary/{decision_id} Advisory LLM summary for reviewers (YELLOW/RED; lazy).
 POST   /batch_rank                 Bulk ZIP ingest + parallel governance + merit rank.
 POST   /batch_rank/stream          Same workflow with SSE progress events.
 """
@@ -33,7 +34,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form
+from fastapi import Body, FastAPI, HTTPException, Request, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
@@ -53,6 +54,7 @@ from core.artifact_engine import export_for_regulator
 from core.resume_parser import extract_text_from_pdf, parse_resume
 from core.batch_ranking import execute_batch_zip_ranking_async
 from core.supabase_storage import get_signed_resume_url
+from core.tech_review_summary import generate_tech_review_summary
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -144,6 +146,12 @@ class TechReviewInput(BaseModel):
     action: str = Field(..., pattern="^(ACCEPT|REJECT)$", json_schema_extra={"example": "ACCEPT"})
     reviewer_id: str = Field(..., json_schema_extra={"example": "TECH-LEAD-01"})
     note: str = Field("", json_schema_extra={"example": "Validated against job description."})
+
+
+class ReviewerSummaryInput(BaseModel):
+    """Optional job description excerpt to improve alignment narrative (bulk JD is often not persisted on artifact)."""
+
+    job_description: Optional[str] = Field(None, json_schema_extra={"example": "Senior Backend Engineer …"})
 
 
 # ---------------------------------------------------------------------------
@@ -578,6 +586,55 @@ async def tech_review(decision_id: str, body: TechReviewInput):
         body.reviewer_id,
     )
     return {"message": "Tech review recorded.", "artifact": artifact}
+
+
+@app.post(
+    "/reviewer-summary/{decision_id}",
+    summary="Advisory LLM reviewer summary (YELLOW/RED; does not change governance)",
+)
+async def reviewer_summary(
+    decision_id: str,
+    body: ReviewerSummaryInput = Body(),
+):
+    """
+    Generate a governance-safe, advisory-only narrative for technical/HR reviewers.
+
+    - Skips GREEN routing (keeps bulk throughput cheap; GREEN cases are not escalated here).
+    - Does not persist output on the artifact (hashes stay stable).
+    """
+    artifact = _load_artifact(decision_id)
+    route = str(artifact.get("routing_classification") or "").strip().upper()
+    if route == "GREEN":
+        return {
+            "ok": False,
+            "advisory_only": True,
+            "error": "Advisor summaries are not generated for GREEN routing (lightweight path).",
+            "summary": None,
+        }
+
+    jd = body.job_description or None
+    try:
+        summary, resume_meta = await asyncio.to_thread(
+            generate_tech_review_summary,
+            artifact,
+            decision_id,
+            jd,
+        )
+        return {
+            "ok": True,
+            "advisory_only": True,
+            "routing_classification": route,
+            "summary": summary,
+            "resume_context": resume_meta,
+        }
+    except Exception as exc:
+        logger.warning("reviewer_summary_failed decision_id=%s err=%s", decision_id, exc)
+        return {
+            "ok": False,
+            "advisory_only": True,
+            "error": str(exc)[:500],
+            "summary": None,
+        }
 
 
 # ---------------------------------------------------------------------------

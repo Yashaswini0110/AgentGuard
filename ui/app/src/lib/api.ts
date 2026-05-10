@@ -97,6 +97,43 @@ export async function postEscalate(decisionId: string, body: { reviewer_id: stri
   })
 }
 
+/** Advisory-only reviewer narrative; grounded in résumé text when available (server-side). */
+export interface ReviewerSummary {
+  candidate_overview: string
+  technical_skills_stack: string
+  projects_and_experience: string
+  job_alignment: string
+  skill_gaps_concerns: string[]
+  technical_opinion: string
+  suggested_action: string
+  governance_notes: string
+}
+
+export interface ReviewerResumeContext {
+  resume_grounded: boolean
+  resume_source?: string | null
+  resume_chars_used: number
+}
+
+export interface ReviewerSummaryResponse {
+  ok: boolean
+  advisory_only?: boolean
+  routing_classification?: string
+  error?: string
+  summary?: ReviewerSummary | null
+  resume_context?: ReviewerResumeContext
+}
+
+export async function postReviewerSummary(decisionId: string, jobDescription?: string) {
+  return await httpJson<ReviewerSummaryResponse>(
+    `/reviewer-summary/${encodeURIComponent(decisionId)}`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ job_description: jobDescription ?? null }),
+    }
+  )
+}
+
 export async function postTechReview(
   decisionId: string,
   body: { action: 'ACCEPT' | 'REJECT'; reviewer_id: string; note: string }

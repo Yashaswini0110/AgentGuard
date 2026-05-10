@@ -10,6 +10,7 @@ import {
 } from '@/lib/artifactHelpers'
 import type { AgentGuardArtifact } from '@/types/agentguard'
 import { useDemoAuth } from '@/contexts/DemoAuthContext'
+import TechReviewerSummaryPanel from '@/components/TechReviewerSummaryPanel'
 
 interface TechCase {
   id: string
@@ -215,7 +216,13 @@ export default function TechReviewPage() {
 
               <div className="my-4" style={{ height: '1px', backgroundColor: '#E4E2DC' }} />
 
-              <div className="flex gap-8">
+              <TechReviewerSummaryPanel
+                key={c.decisionId}
+                decisionId={c.decisionId}
+                routingClassification={c.artifact.routing_classification ?? c.routingClass}
+              />
+
+              <div className="flex gap-8 mt-4">
                 <div style={{ width: '60%' }}>
                   <div className="flex flex-col">
                     {[
