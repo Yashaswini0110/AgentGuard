@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import AppShell from '@/components/AppShell'
-import { apiBase, fetchRecentArtifacts } from '@/lib/api'
+import { apiBase, fetchRecentArtifacts, postShortlistEmail } from '@/lib/api'
+import { useDemoAuth } from '@/contexts/DemoAuthContext'
 import {
+  candidateEmail,
+  candidateJobRole,
   formatArtifactTime,
   isShortlisted,
   placeholderEmail,
@@ -14,35 +17,44 @@ interface CandidateRow {
   role: string
   source: string
   email: string
+  emailFromResume: boolean
   /** Present when shortlisted via tech ACCEPT — shown to HR */
   techReviewerId?: string
   techReviewedAtLabel?: string
 }
 
-export default function ShortlistPage() {
-  const [candidates, setCandidates] = useState<CandidateRow[]>([])
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-  const [subject, setSubject] = useState('Interview Shortlisting — [Role] Position')
-  const [body, setBody] = useState(
-    `Dear Candidate,
+const DEFAULT_SHORTLIST_SUBJECT =
+  'AgentGuard – Application Shortlisted for Interview Process'
 
-Congratulations! We are pleased to inform you that you have been shortlisted for the next round of interviews.
+const DEFAULT_SHORTLIST_BODY = `Dear [Candidate Name],
 
-Our AI governance system (AgentGuard v3) has reviewed your application alongside our hiring panel, and your profile has cleared all compliance and technical checks.
+Thank you for your interest in the [Role Title] opportunity.
 
-Next steps:
-• A member of our recruitment team will contact you within 2 business days to schedule your interview.
-• Please ensure your contact details are up to date.
-• If you have any questions, reply to this email or reach out to hr@company.com.
+We are delighted to inform you that your profile has successfully cleared our initial evaluation process and has been shortlisted for the interview stage.
 
-We look forward to speaking with you.
+Our recruitment team will contact you shortly to coordinate and schedule your interview. Additional information regarding the interview process, timing, and next steps will be shared in the upcoming communication.
+
+We appreciate your interest in joining our team and look forward to discussing your qualifications and experience in more detail.
+
+Thank you for your patience, and congratulations on progressing to the next stage.
 
 Best regards,
-HR Compliance Team
-Company Inc.`
-  )
+
+AgentGuard Recruitment Team
+agentguard.hr@gmail.com
++91 9000000001`
+
+export default function ShortlistPage() {
+  const { user } = useDemoAuth()
+  const [candidates, setCandidates] = useState<CandidateRow[]>([])
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [subject, setSubject] = useState(DEFAULT_SHORTLIST_SUBJECT)
+  const [body, setBody] = useState(DEFAULT_SHORTLIST_BODY)
   const [emailedCount, setEmailedCount] = useState(0)
   const [showSuccess, setShowSuccess] = useState(false)
+  const [sendError, setSendError] = useState<string | null>(null)
+  const [sendDetail, setSendDetail] = useState<string | null>(null)
+  const [sending, setSending] = useState(false)
   const [loadErr, setLoadErr] = useState<string | null>(null)
 
   const reload = useCallback(async () => {
@@ -51,19 +63,22 @@ Company Inc.`
       const arts = await fetchRecentArtifacts(160)
       const rows: CandidateRow[] = arts
         .filter((a) => isShortlisted(a))
-        .map((a) => ({
+        .map((a) => {
+          const parsed = candidateEmail(a)
+          return {
           id: a.decision_id,
           name: a.candidate_name ?? a.candidate_id ?? 'Unknown',
-          role: 'Applicant',
+          role: candidateJobRole(a) ?? 'Role not recorded',
           source: shortlistSource(a),
-          email: placeholderEmail(a.candidate_name, a.decision_id),
+          email: parsed ?? placeholderEmail(a.candidate_name, a.decision_id),
+          emailFromResume: Boolean(parsed),
           techReviewerId:
             a.tech_review?.decision === 'ACCEPT' ? a.tech_review.reviewer_id : undefined,
           techReviewedAtLabel:
             a.tech_review?.decision === 'ACCEPT'
               ? formatArtifactTime(a.tech_review.reviewed_at)
               : undefined,
-        }))
+        }})
       setCandidates(rows)
     } catch (e) {
       setLoadErr(e instanceof Error ? e.message : 'Failed to load shortlist')
@@ -94,11 +109,58 @@ Company Inc.`
 
   const selectedCandidates = candidates.filter((c) => selectedIds.has(c.id))
 
-  const handleSend = () => {
-    setEmailedCount(selectedCandidates.length)
-    setShowSuccess(true)
-    setTimeout(() => setShowSuccess(false), 3000)
+  const handleSend = async () => {
+    setSendError(null)
+    setSendDetail(null)
+    if (!user || user.role !== 'hr') {
+      setSendError('Log in as an HR reviewer to send shortlist emails.')
+      return
+    }
+    const missingEmail = selectedCandidates.filter((c) => !c.emailFromResume)
+    if (missingEmail.length > 0) {
+      setSendError(
+        `${missingEmail.length} selected candidate(s) have no résumé email — deselect them or re-run bulk ingest.`
+      )
+      return
+    }
+    setSending(true)
+    try {
+      const res = await postShortlistEmail({
+        decision_ids: selectedCandidates.map((c) => c.id),
+        subject: subject.trim(),
+        body: body.trim(),
+        sender_id: user.id,
+      })
+      setEmailedCount((n) => n + res.sent)
+      if (res.sent > 0) {
+        setShowSuccess(true)
+        setTimeout(() => setShowSuccess(false), 4000)
+      }
+      const parts: string[] = []
+      if (res.sent) parts.push(`${res.sent} sent`)
+      if (res.skipped) parts.push(`${res.skipped} skipped`)
+      if (res.failed) parts.push(`${res.failed} failed`)
+      setSendDetail(parts.join(' · ') || 'No messages dispatched.')
+      if (res.failed > 0 || (res.sent === 0 && res.skipped > 0)) {
+        const reasons = res.results
+          .filter((r) => r.status !== 'SENT')
+          .map((r) => `${r.decision_id.slice(0, 8)}…: ${r.reason ?? r.error ?? r.status}`)
+          .join('; ')
+        if (reasons) setSendError(reasons)
+      }
+      if (res.sent > 0) void reload()
+    } catch (e) {
+      setSendError(e instanceof Error ? e.message : 'Failed to send emails')
+    } finally {
+      setSending(false)
+    }
   }
+
+  const canSend =
+    selectedCandidates.length > 0 &&
+    user?.role === 'hr' &&
+    selectedCandidates.every((c) => c.emailFromResume) &&
+    !sending
 
   function sourceDotColor(src: string) {
     if (src.includes('HR')) return '#0D6EFD'
@@ -133,10 +195,16 @@ Company Inc.`
             Refresh
           </button>
           <span className="font-sans font-semibold text-sm" style={{ color: '#0D0D0D' }}>
-            {candidates.length} accepted · {emailedCount} emailed (demo)
+            {candidates.length} accepted · {emailedCount} emailed
           </span>
         </div>
       </div>
+
+      {user?.role !== 'hr' && (
+        <p className="font-sans text-xs mb-4 px-3 py-2 rounded-md" style={{ backgroundColor: '#FEF3C7', color: '#92400E' }}>
+          Log in as HR to send shortlist emails. Viewing the queue is available to all demo roles.
+        </p>
+      )}
 
       <div className="flex gap-6">
         <div style={{ width: '60%' }}>
@@ -218,8 +286,13 @@ Company Inc.`
                       {c.source}
                     </span>
                   </div>
-                  <span className="font-mono text-xs" style={{ color: '#6B6B6B' }}>
+                  <span
+                    className="font-mono text-xs"
+                    style={{ color: c.emailFromResume ? '#6B6B6B' : '#B45309' }}
+                    title={c.emailFromResume ? 'Extracted from résumé' : 'No email on résumé — placeholder shown'}
+                  >
                     {c.email}
+                    {!c.emailFromResume ? ' · est.' : ''}
                   </span>
                 </div>
               )
@@ -245,7 +318,7 @@ Company Inc.`
                 From
               </label>
               <span className="font-mono text-xs" style={{ color: '#6B6B6B' }}>
-                HR Compliance · agentguard-hr@company.com
+                AgentGuard Recruitment Team · agentguard.hr@gmail.com
               </span>
             </div>
 
@@ -321,7 +394,7 @@ Company Inc.`
                 style={{
                   border: '1px solid #E4E2DC',
                   backgroundColor: '#FFFFFF',
-                  height: '240px',
+                  height: '280px',
                   outline: 'none',
                   resize: 'vertical',
                   color: '#0D0D0D',
@@ -332,22 +405,36 @@ Company Inc.`
 
             <button
               type="button"
-              onClick={handleSend}
-              disabled={selectedCandidates.length === 0}
+              onClick={() => void handleSend()}
+              disabled={!canSend}
               className="w-full font-sans text-sm font-medium py-2.5 rounded-lg transition-opacity"
               style={{
-                backgroundColor: selectedCandidates.length === 0 ? '#E4E2DC' : '#0D6EFD',
-                color: selectedCandidates.length === 0 ? '#9B9B9B' : '#FFFFFF',
+                backgroundColor: !canSend ? '#E4E2DC' : '#0D6EFD',
+                color: !canSend ? '#9B9B9B' : '#FFFFFF',
                 border: 'none',
-                cursor: selectedCandidates.length === 0 ? 'not-allowed' : 'pointer',
+                cursor: !canSend ? 'not-allowed' : 'pointer',
               }}
             >
-              {showSuccess ? 'Emails Sent!' : `Send ${selectedCandidates.length} Email${selectedCandidates.length !== 1 ? 's' : ''}`}
+              {sending
+                ? 'Sending…'
+                : showSuccess
+                  ? 'Emails Sent!'
+                  : `Send ${selectedCandidates.length} Email${selectedCandidates.length !== 1 ? 's' : ''}`}
             </button>
 
+            {sendError && (
+              <p className="font-sans text-xs mt-2 text-center" style={{ color: '#B91C1C' }}>
+                {sendError}
+              </p>
+            )}
+            {sendDetail && !sendError && (
+              <p className="font-sans text-xs mt-2 text-center" style={{ color: '#15803D' }}>
+                {sendDetail}
+              </p>
+            )}
             {showSuccess && (
               <p className="font-sans text-xs mt-2 text-center" style={{ color: '#15803D' }}>
-                Demo only — no mail transport is wired yet.
+                Check server logs when ENVIRONMENT=development (mock). Set ENVIRONMENT=production for Gmail SMTP.
               </p>
             )}
           </div>

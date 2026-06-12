@@ -18,9 +18,10 @@ POST   /human-review/{decision_id} Record a human APPROVE / REJECT action.
 GET    /artifacts/recent           Recent saved artifacts (full JSON).
 POST   /escalate/{decision_id}     HR escalation to tech review.
 POST   /tech-review/{decision_id} Tech reviewer ACCEPT / REJECT.
-POST   /reviewer-summary/{decision_id} Advisory LLM summary for reviewers (YELLOW/RED; lazy).
+POST   /reviewer-summary/{decision_id} Advisory LLM summary for reviewers (YELLOW/RED; GREEN if escalated).
 POST   /batch_rank                 Bulk ZIP ingest + parallel governance + merit rank.
 POST   /batch_rank/stream          Same workflow with SSE progress events.
+POST   /shortlist/email             Send shortlist notification emails (Gmail SMTP / mock).
 """
 
 from __future__ import annotations
@@ -55,6 +56,7 @@ from core.resume_parser import extract_text_from_pdf, parse_resume
 from core.batch_ranking import execute_batch_zip_ranking_async
 from core.supabase_storage import get_signed_resume_url
 from core.tech_review_summary import generate_tech_review_summary
+from core.email import email_transport_status, prepare_rejection_dispatch, prepare_shortlist_dispatch
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -154,6 +156,13 @@ class ReviewerSummaryInput(BaseModel):
     job_description: Optional[str] = Field(None, json_schema_extra={"example": "Senior Backend Engineer …"})
 
 
+class ShortlistEmailInput(BaseModel):
+    decision_ids: list[str] = Field(..., min_length=1)
+    subject: str = Field(..., min_length=1)
+    body: str = Field(..., min_length=1)
+    sender_id: str = Field(..., json_schema_extra={"example": "HR-COMPLIANCE-01"})
+
+
 # ---------------------------------------------------------------------------
 # Artifact directory helper
 # ---------------------------------------------------------------------------
@@ -206,6 +215,24 @@ def _clear_bulk_review_pending(artifact: dict) -> None:
     cleared["bulk_review_pending"] = False
     cleared["bulk_hr_cleared_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
     artifact["workflow_context"] = cleared
+
+
+def _attach_rejection_email(
+    artifact: dict,
+    *,
+    sender_id: str,
+    reviewer_comment: str,
+    rejection_source: str,
+) -> dict:
+    row, dispatch = prepare_rejection_dispatch(
+        artifact,
+        sender_id=sender_id,
+        reviewer_comment=reviewer_comment,
+        rejection_source=rejection_source,
+    )
+    if dispatch:
+        artifact["rejection_email_dispatch"] = dispatch
+    return row
 
 
 # ---------------------------------------------------------------------------
@@ -342,6 +369,7 @@ async def health():
         # Absolute path of the loaded module — if this is not your repo, the wrong process bound the port.
         "api_module_file": str(Path(__file__).resolve()),
         "batch_rank_available": "/batch_rank" in route_paths and "/batch_rank/stream" in route_paths,
+        "email": email_transport_status(),
     }
 
 
@@ -541,6 +569,15 @@ async def human_review(decision_id: str, body: HumanReviewInput):
     }
     _clear_bulk_review_pending(artifact)
 
+    rejection_email = None
+    if body.action == "REJECT":
+        rejection_email = _attach_rejection_email(
+            artifact,
+            sender_id=body.reviewer_id,
+            reviewer_comment=body.reason,
+            rejection_source="hr",
+        )
+
     _write_artifact_file(artifact)
     logger.info(
         "Human review recorded | decision_id=%s | action=%s | reviewer=%s",
@@ -549,7 +586,10 @@ async def human_review(decision_id: str, body: HumanReviewInput):
         body.reviewer_id,
     )
 
-    return {"message": "Human review recorded.", "artifact": artifact}
+    payload: dict = {"message": "Human review recorded.", "artifact": artifact}
+    if rejection_email is not None:
+        payload["rejection_email"] = rejection_email
+    return payload
 
 
 @app.post("/escalate/{decision_id}", summary="HR escalation to technical review")
@@ -578,6 +618,16 @@ async def tech_review(decision_id: str, body: TechReviewInput):
         "reviewed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }
     _clear_bulk_review_pending(artifact)
+
+    rejection_email = None
+    if body.action == "REJECT":
+        rejection_email = _attach_rejection_email(
+            artifact,
+            sender_id=body.reviewer_id,
+            reviewer_comment=body.note,
+            rejection_source="tech",
+        )
+
     _write_artifact_file(artifact)
     logger.info(
         "Tech review recorded | decision_id=%s | action=%s | reviewer=%s",
@@ -585,7 +635,74 @@ async def tech_review(decision_id: str, body: TechReviewInput):
         body.action,
         body.reviewer_id,
     )
-    return {"message": "Tech review recorded.", "artifact": artifact}
+
+    payload: dict = {"message": "Tech review recorded.", "artifact": artifact}
+    if rejection_email is not None:
+        payload["rejection_email"] = rejection_email
+    return payload
+
+
+@app.post("/shortlist/email", summary="Send shortlist notification emails to accepted candidates")
+async def shortlist_email(body: ShortlistEmailInput):
+    """
+    HR-only dispatch for shortlisted candidates.
+
+    Uses Gmail SMTP when ENVIRONMENT=production; otherwise logs a mock payload.
+    Persists ``email_dispatch`` on each successfully sent artifact.
+    """
+    sender = (body.sender_id or "").strip()
+    if not sender.upper().startswith("HR-"):
+        raise HTTPException(
+            status_code=403,
+            detail="Only HR reviewers may send shortlist emails.",
+        )
+
+    subject = body.subject.strip()
+    message_body = body.body.strip()
+    if not subject or not message_body:
+        raise HTTPException(status_code=400, detail="Subject and body are required.")
+
+    results: list[dict] = []
+    sent = failed = skipped = 0
+
+    for decision_id in body.decision_ids:
+        did = (decision_id or "").strip()
+        if not did:
+            skipped += 1
+            results.append({"decision_id": decision_id, "status": "SKIPPED", "reason": "empty_id"})
+            continue
+        try:
+            artifact = _load_artifact(did)
+        except HTTPException:
+            failed += 1
+            results.append({"decision_id": did, "status": "FAILED", "error": "artifact_not_found"})
+            continue
+
+        row, dispatch = prepare_shortlist_dispatch(
+            artifact,
+            subject_template=subject,
+            body_template=message_body,
+            sender_id=sender,
+        )
+        results.append(row)
+        status = row.get("status")
+        if status == "SENT" and dispatch:
+            artifact["email_dispatch"] = dispatch
+            _write_artifact_file(artifact)
+            sent += 1
+            logger.info(
+                "Shortlist email sent | decision_id=%s | to=%s | sender=%s | mock=%s",
+                did,
+                dispatch.get("to"),
+                sender,
+                dispatch.get("mock"),
+            )
+        elif status == "SKIPPED":
+            skipped += 1
+        else:
+            failed += 1
+
+    return {"sent": sent, "failed": failed, "skipped": skipped, "results": results}
 
 
 @app.post(
@@ -599,12 +716,13 @@ async def reviewer_summary(
     """
     Generate a governance-safe, advisory-only narrative for technical/HR reviewers.
 
-    - Skips GREEN routing (keeps bulk throughput cheap; GREEN cases are not escalated here).
+    - Skips GREEN routing unless HR escalated the case to Tech Review.
     - Does not persist output on the artifact (hashes stay stable).
     """
     artifact = _load_artifact(decision_id)
     route = str(artifact.get("routing_classification") or "").strip().upper()
-    if route == "GREEN":
+    escalated = isinstance(artifact.get("escalation"), dict)
+    if route == "GREEN" and not escalated:
         return {
             "ok": False,
             "advisory_only": True,

@@ -49,9 +49,12 @@ function BulletList({
 export default function TechReviewerSummaryPanel({
   decisionId,
   routingClassification,
+  /** Tech Review queue: HR escalated GREEN cases still need an advisory narrative. */
+  allowAdvisoryOnGreen = false,
 }: {
   decisionId: string
   routingClassification: string
+  allowAdvisoryOnGreen?: boolean
 }) {
   const [expanded, setExpanded] = useState(false)
   const [jd, setJd] = useState('')
@@ -60,7 +63,7 @@ export default function TechReviewerSummaryPanel({
   const [resumeCtx, setResumeCtx] = useState<ReviewerResumeContext | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
-  const green = isGreenRouting(routingClassification)
+  const green = isGreenRouting(routingClassification) && !allowAdvisoryOnGreen
 
   const runGenerate = useCallback(async () => {
     if (green) return

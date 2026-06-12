@@ -4,9 +4,13 @@ import { ResumeViewer } from '@/components/ResumeViewer'
 import { apiBase, fetchRecentArtifacts, postTechReview } from '@/lib/api'
 import {
   formatArtifactTime,
+  formatRejectionEmailStatus,
   modelVersionLabel,
+  normalizeRoutingClass,
+  routingClassColors,
   shapPairs,
   shortHash,
+  type RoutingClass,
 } from '@/lib/artifactHelpers'
 import type { AgentGuardArtifact } from '@/types/agentguard'
 import { useDemoAuth } from '@/contexts/DemoAuthContext'
@@ -17,7 +21,7 @@ interface TechCase {
   artifact: AgentGuardArtifact
   candidate: string
   role: string
-  routingClass: 'RED' | 'YELLOW'
+  routingClass: RoutingClass
   policyRule: string
   confidence: string
   servicenowTicket?: string
@@ -32,7 +36,7 @@ interface TechCase {
 
 function mapEscalated(a: AgentGuardArtifact): TechCase | null {
   if (!a.escalation) return null
-  const route = (a.routing_classification ?? 'RED') as 'RED' | 'YELLOW'
+  const route = normalizeRoutingClass(a.routing_classification, 'RED')
   const pairs = shapPairs(a)
 
   return {
@@ -40,7 +44,7 @@ function mapEscalated(a: AgentGuardArtifact): TechCase | null {
     artifact: a,
     candidate: a.candidate_name ?? a.candidate_id ?? 'Unknown',
     role: 'Applicant',
-    routingClass: route === 'YELLOW' ? 'YELLOW' : 'RED',
+    routingClass: route,
     policyRule: a.policy_rule_cited ?? 'NONE',
     confidence:
       typeof a.confidence_score === 'number' ? a.confidence_score.toFixed(2) : '—',
@@ -104,6 +108,7 @@ export default function TechReviewPage() {
   const [techNotes, setTechNotes] = useState<Record<string, string>>({})
   const [busyId, setBusyId] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [actionNotice, setActionNotice] = useState<string | null>(null)
   const [resumeViewer, setResumeViewer] = useState<{ decisionId: string; candidate: string } | null>(null)
 
   const reload = useCallback(async () => {
@@ -130,12 +135,17 @@ export default function TechReviewPage() {
     if (!c) return
     setBusyId(id)
     setErr(null)
+    setActionNotice(null)
     try {
-      await postTechReview(c.decisionId, {
+      const res = await postTechReview(c.decisionId, {
         action,
         reviewer_id: user?.id ?? 'TECH-REVIEWER-UNKNOWN',
         note: techNotes[id] ?? '',
       })
+      if (action === 'REJECT') {
+        const emailNote = formatRejectionEmailStatus(res.rejection_email)
+        if (emailNote) setActionNotice(emailNote)
+      }
       await reload()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Tech review failed')
@@ -159,6 +169,11 @@ export default function TechReviewPage() {
           {err && (
             <p className="font-sans text-xs mt-2" style={{ color: '#B91C1C' }}>
               {err}
+            </p>
+          )}
+          {actionNotice && (
+            <p className="font-sans text-xs mt-2" style={{ color: '#15803D' }}>
+              {actionNotice}
             </p>
           )}
         </div>
@@ -189,6 +204,7 @@ export default function TechReviewPage() {
         {cases.map((c) => {
           const note = techNotes[c.id] || ''
           const isBusy = busyId === c.id
+          const routeColors = routingClassColors(c.routingClass)
 
           return (
             <div
@@ -219,7 +235,8 @@ export default function TechReviewPage() {
               <TechReviewerSummaryPanel
                 key={c.decisionId}
                 decisionId={c.decisionId}
-                routingClassification={c.artifact.routing_classification ?? c.routingClass}
+                routingClassification={c.routingClass}
+                allowAdvisoryOnGreen
               />
 
               <div className="flex gap-8 mt-4">
@@ -236,13 +253,10 @@ export default function TechReviewPage() {
                                 width: '8px',
                                 height: '8px',
                                 borderRadius: '2px',
-                                backgroundColor: c.routingClass === 'RED' ? '#B91C1C' : '#B45309',
+                                backgroundColor: routeColors.dot,
                               }}
                             />
-                            <span
-                              className="font-mono text-xs"
-                              style={{ color: c.routingClass === 'RED' ? '#B91C1C' : '#B45309' }}
-                            >
+                            <span className="font-mono text-xs" style={{ color: routeColors.text }}>
                               {c.routingClass}
                             </span>
                           </div>

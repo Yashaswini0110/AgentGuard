@@ -4,6 +4,28 @@ export interface AgentGuardArtifact {
   timestamp: string
   candidate_id?: string | null
   candidate_name?: string | null
+  candidate_email?: string | null
+  job_role?: string | null
+  email_dispatch?: {
+    sent_at?: string
+    sent_by?: string
+    to?: string
+    subject?: string
+    role_title?: string
+    status?: string
+    mock?: boolean
+  } | null
+  rejection_email_dispatch?: {
+    sent_at?: string
+    sent_by?: string
+    to?: string
+    subject?: string
+    role_title?: string
+    rejection_source?: string
+    reviewer_comment?: string
+    status?: string
+    mock?: boolean
+  } | null
   decision_outcome?: string | null
   policy_result: string
   policy_violations?: Array<Record<string, unknown>>
@@ -38,10 +60,12 @@ export interface AgentGuardArtifact {
     bulk_session_id?: string
     bulk_job_fingerprint?: string
     open_positions_requested?: number
+    job_role?: string
     bulk_hr_cleared_at?: string
     bulk_processing_failure?: boolean
     bulk_failure_phase?: string
     bulk_failure_detail?: string
+    candidate_email?: string
   }
 }
 
@@ -119,4 +143,33 @@ export interface BatchRankResponse {
   ranked_candidates: BatchRankCandidateRow[]
   skipped_files?: Array<{ file: string; reason: string }>
   [key: string]: unknown
+}
+
+export interface ShortlistEmailResultRow {
+  decision_id: string
+  email?: string
+  status: string
+  reason?: string
+  error?: string
+}
+
+export interface ShortlistEmailResponse {
+  sent: number
+  failed: number
+  skipped: number
+  results: ShortlistEmailResultRow[]
+}
+
+export interface RejectionEmailResult {
+  decision_id?: string
+  email?: string
+  status: string
+  reason?: string
+  error?: string
+}
+
+export interface ReviewActionResponse {
+  message?: string
+  artifact?: unknown
+  rejection_email?: RejectionEmailResult
 }

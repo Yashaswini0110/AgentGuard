@@ -26,7 +26,14 @@ import {
 } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
 import { apiBase, joinUrl, postBatchRankStream } from '@/lib/api'
+import {
+  JOB_ROLE_OPTIONS,
+  JOB_ROLE_PRESETS,
+  presetSkills,
+  type JobRoleOption,
+} from '@/lib/jobRolePresets'
 import type { BatchRankCandidateRow, BatchRankResponse } from '@/types/agentguard'
+import { Badge } from '@/components/ui/badge'
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 
 function exportUrl(decisionId: string) {
@@ -34,6 +41,7 @@ function exportUrl(decisionId: string) {
 }
 
 export default function BulkRankPage() {
+  const [roleOption, setRoleOption] = useState<JobRoleOption>('Custom')
   const [jobDescription, setJobDescription] = useState('')
   const [openings, setOpenings] = useState(5)
   const [zipFile, setZipFile] = useState<File | null>(null)
@@ -152,6 +160,27 @@ export default function BulkRankPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
+                <Label htmlFor="role-preset">Target role</Label>
+                <select
+                  id="role-preset"
+                  value={roleOption}
+                  onChange={(e) => {
+                    const next = e.target.value as JobRoleOption
+                    setRoleOption(next)
+                    if (next !== 'Custom') {
+                      setJobDescription(JOB_ROLE_PRESETS[next].description)
+                    }
+                  }}
+                  className="flex h-9 w-full rounded-md border border-[#E4E2DC] bg-white px-3 py-1 font-sans text-sm text-[#0D0D0D] outline-none focus-visible:ring-2 focus-visible:ring-[#0D6EFD]/30"
+                >
+                  {JOB_ROLE_OPTIONS.map((opt) => (
+                    <option key={opt} value={opt}>
+                      {opt === 'Custom' ? 'Custom (paste your own JD)' : opt}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-2">
                 <Label htmlFor="jd">Job description</Label>
                 <Textarea
                   id="jd"
@@ -159,9 +188,35 @@ export default function BulkRankPage() {
                   className="font-mono text-xs"
                   style={{ borderColor: '#E4E2DC' }}
                   value={jobDescription}
-                  onChange={(e) => setJobDescription(e.target.value)}
+                  onChange={(e) => {
+                    const value = e.target.value
+                    setJobDescription(value)
+                    if (roleOption !== 'Custom') {
+                      const preset = JOB_ROLE_PRESETS[roleOption]
+                      if (value !== preset.description) setRoleOption('Custom')
+                    }
+                  }}
                   placeholder="Paste the live job description from your ATS or internal requisition — nothing is hard-coded here."
                 />
+                {presetSkills(roleOption).length > 0 ? (
+                  <div className="space-y-2 rounded-md border border-[#E4E2DC] bg-[#F7F6F3] px-3 py-2.5">
+                    <p className="font-sans text-xs font-medium" style={{ color: '#6B6B6B' }}>
+                      Required skills for {roleOption}
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {presetSkills(roleOption).map((skill) => (
+                        <Badge
+                          key={skill}
+                          variant="secondary"
+                          className="font-sans text-xs font-normal"
+                          style={{ backgroundColor: '#FFFFFF', border: '1px solid #E4E2DC', color: '#0D0D0D' }}
+                        >
+                          {skill}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">

@@ -69,6 +69,8 @@ STRICT RULES:
 - Use the exact schema keys below (including `"full_name"` — do not rename it to `"name"`).
 - **full_name** MUST be populated whenever the résumé header or opening lines clearly identify the applicant
   (e.g. capitalized multi-word names at the top). Only use null if no human name is discernible anywhere.
+- **email** MUST be populated when a contact email appears in the header, contact block, or anywhere in the résumé.
+  Use lowercase. Use null only if no valid email address is present.
 - skills, education, certifications, projects must be arrays (empty if unknown).
 - **skills**: list EVERY technical competency visible in the résumé — languages, runtimes,
   frameworks, databases, clouds, infra, data tools, testing, observability — not only a short subset.
@@ -114,6 +116,7 @@ FIELDS TO EXTRACT:
 {
   "candidate_id": "CAND-PDF-XXXX",
   "name": string,
+  "email": string or null,
   "years_of_experience": number,
   "primary_skills": [list of strings],
   "skill_match_score": number (0.0 to 1.0),
@@ -224,7 +227,7 @@ def parse_resume(resume_text: str, job_description: str) -> dict:
         )
         
         max_out = int((os.getenv("AG_RESUME_PARSE_MAX_TOKENS") or "4096").strip() or "4096")
-        return chat_json(
+        data = chat_json(
             system=SYSTEM_PROMPT,
             user=user_content,
             gemini_model=(os.getenv("AG_GEMINI_MODEL_PARSE") or "gemini-2.5-flash").strip(),
@@ -233,6 +236,11 @@ def parse_resume(resume_text: str, job_description: str) -> dict:
             max_tokens=max_out,
             retries=2,
         )
+        if isinstance(data, dict):
+            resolved_email = resolve_candidate_email(data, resume_text)
+            if resolved_email:
+                data["email"] = resolved_email
+        return data
     except Exception as e:
         # #region agent log
         try:
@@ -349,6 +357,43 @@ def humanize_resume_filename_stem(stem: str) -> str:
     return s.strip() or stem
 
 
+_EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
+_PLACEHOLDER_EMAIL_DOMAINS = frozenset({"example.com", "example.org", "test.com", "email.com"})
+
+
+def _normalize_email(value: str | None) -> str | None:
+    if not value or not isinstance(value, str):
+        return None
+    email = value.strip().lower()
+    if not _EMAIL_RE.fullmatch(email):
+        return None
+    domain = email.rsplit("@", 1)[-1]
+    if domain in _PLACEHOLDER_EMAIL_DOMAINS:
+        return None
+    return email
+
+
+def extract_email_from_text(text: str) -> str | None:
+    """Regex fallback when the LLM omits email from structured output."""
+    if not text:
+        return None
+    for match in _EMAIL_RE.finditer(text):
+        normalized = _normalize_email(match.group(0))
+        if normalized:
+            return normalized
+    return None
+
+
+def resolve_candidate_email(structured: dict | None, resume_text: str = "") -> str | None:
+    """Prefer LLM-extracted email; fall back to regex over raw résumé text."""
+    structured = structured or {}
+    from_llm = _normalize_email(structured.get("email"))
+    if from_llm:
+        return from_llm
+    blob = resume_text or structured.get("resume_text") or ""
+    return extract_email_from_text(str(blob))
+
+
 def _strip_code_fence(raw: str) -> str:
     t = (raw or "").strip()
     if t.startswith("```json"):
@@ -406,6 +451,9 @@ def parse_resume_structured(resume_text: str, job_description: str = "") -> dict
     merged = coalesce_candidate_full_name(data)
     if merged:
         data["full_name"] = merged
+    resolved_email = resolve_candidate_email(data, resume_text_clean)
+    if resolved_email:
+        data["email"] = resolved_email
     # Ensure we carry the real extracted text even if the model returns empty/truncated text.
     # (Structured prompt forces resume_text to be "", to avoid provider truncation.)
     data["resume_text"] = resume_text_clean[:8000]

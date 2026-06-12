@@ -25,6 +25,7 @@ from core.resume_parser import (
     guess_name_from_resume_header,
     humanize_resume_filename_stem,
     parse_resume_structured,
+    resolve_candidate_email,
 )
 from core.job_match_scores import composite_match_scores
 from core.artifact_engine import generate_artifact, save_artifact
@@ -33,6 +34,17 @@ from core.sync_pipeline import sync_governance_pipeline
 from core.supabase_storage import upload_resume
 
 logger = logging.getLogger("agentguard.batch")
+
+
+def _normalize_job_role_title(job_description: str) -> str:
+    """First JD line as display title; strip a leading 'Role:' prefix when present."""
+    jd = (job_description or "").strip()
+    if not jd:
+        return "Open Role"
+    first = jd.splitlines()[0].strip()[:180]
+    if first.lower().startswith("role:"):
+        first = first[5:].strip()
+    return first or "Open Role"
 
 
 def _persist_bulk_failure_governance_sync(
@@ -242,6 +254,12 @@ async def process_single_resume_candidate(
         display_name = humanize_resume_filename_stem(stem)
     structured["full_name"] = display_name
 
+    merged_wc = dict(workflow_context or {})
+    resolved_email = resolve_candidate_email(structured, extracted_text)
+    if resolved_email:
+        merged_wc["candidate_email"] = resolved_email
+        structured["email"] = resolved_email
+
     scores = composite_match_scores(structured, job_description)
     composite = float(scores["composite_score"])
 
@@ -271,7 +289,7 @@ async def process_single_resume_candidate(
                 _run_in_thread(
                     sync_governance_pipeline,
                     cand_for_pipeline,
-                    workflow_context=workflow_context,
+                    workflow_context=merged_wc,
                 ),
                 timeout=240.0,
             ),
@@ -492,7 +510,7 @@ async def execute_batch_zip_ranking_async(
     progress: Optional[ProgressPublisher] = None,
 ) -> dict[str, Any]:
     jd = job_description or ""
-    job_role = jd.strip().splitlines()[0][:180] if jd.strip() else "Open Role"
+    job_role = _normalize_job_role_title(jd)
 
     bulk_session_id = str(uuid.uuid4())
     open_n = max(1, int(open_positions or 1))
@@ -505,6 +523,7 @@ async def execute_batch_zip_ranking_async(
         "bulk_session_id": bulk_session_id,
         "bulk_job_fingerprint": job_fingerprint,
         "open_positions_requested": open_n,
+        "job_role": job_role,
     }
 
     t0 = time.perf_counter()

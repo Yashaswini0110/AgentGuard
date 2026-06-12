@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router'
 import { ArrowLeft } from 'lucide-react'
 import AppShell from '@/components/AppShell'
 import { postDecision, postResumeParse } from '@/lib/api'
+import { JOB_ROLE_OPTIONS, JOB_ROLE_PRESETS, type JobRoleOption } from '@/lib/jobRolePresets'
 
 export default function RunDecisionPage() {
   const navigate = useNavigate()
@@ -26,15 +27,9 @@ export default function RunDecisionPage() {
   const [gender, setGender] = useState('M')
   const [institution_tier, setTier] = useState(2)
 
-  // Streamlit parity: JD-aware resume ingestion
-  const PREDEFINED_JDS: Record<string, string> = {
-    'Software Engineer': 'Role: Software Engineer. Requirements: Python, APIs, Data Structures, System Design.',
-    'Data Scientist': 'Role: Data Scientist. Requirements: Python, ML, Pandas, Statistics.',
-    'Frontend Developer': 'Role: Frontend Developer. Requirements: React, JS, UI/UX.',
-  }
   const [inputMode, setInputMode] = useState<'manual' | 'resume'>('manual')
-  const [jdOption, setJdOption] = useState<'Custom' | keyof typeof PREDEFINED_JDS>('Software Engineer')
-  const [jdText, setJdText] = useState(PREDEFINED_JDS['Software Engineer'])
+  const [jdOption, setJdOption] = useState<JobRoleOption>('Software Engineer')
+  const [jdText, setJdText] = useState(JOB_ROLE_PRESETS['Software Engineer'].description)
   const [resumeFile, setResumeFile] = useState<File | null>(null)
 
   // Optional proxy fields (Streamlit's simulate_bias / metadata)
@@ -225,19 +220,17 @@ export default function RunDecisionPage() {
                   <select
                     value={jdOption}
                     onChange={(e) => {
-                      const next = e.target.value as 'Custom' | keyof typeof PREDEFINED_JDS
+                      const next = e.target.value as JobRoleOption
                       setJdOption(next)
-                      if (next !== 'Custom') setJdText(PREDEFINED_JDS[next])
+                      if (next !== 'Custom') setJdText(JOB_ROLE_PRESETS[next].description)
                     }}
                     style={{ ...inputStyle }}
                   >
-                    {(['Custom', ...Object.keys(PREDEFINED_JDS)] as Array<'Custom' | keyof typeof PREDEFINED_JDS>).map(
-                      (opt) => (
-                        <option key={opt} value={opt}>
-                          {opt}
-                        </option>
-                      )
-                    )}
+                    {JOB_ROLE_OPTIONS.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
                   </select>
                 </div>
                 <div>

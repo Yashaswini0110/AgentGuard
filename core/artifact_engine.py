@@ -80,7 +80,14 @@ def generate_artifact(
         artifact_body["supervisor_review"] = supervisor_result
 
     if workflow_context:
-        artifact_body["workflow_context"] = dict(workflow_context)
+        wc = dict(workflow_context)
+        artifact_body["workflow_context"] = wc
+        email = wc.get("candidate_email")
+        if isinstance(email, str) and email.strip():
+            artifact_body["candidate_email"] = email.strip().lower()
+        role = wc.get("job_role")
+        if isinstance(role, str) and role.strip():
+            artifact_body["job_role"] = role.strip()
 
     # ------------------------------------------------------------------ #
     # Compute SHA-256 over the sorted, deterministic JSON representation  #

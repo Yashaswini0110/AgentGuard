@@ -1,5 +1,30 @@
 import type { AgentGuardArtifact } from '@/types/agentguard'
 
+export type RoutingClass = 'GREEN' | 'YELLOW' | 'RED'
+
+/** Normalize artifact routing_classification for display and UI gates. */
+export function normalizeRoutingClass(
+  raw?: string | null,
+  fallback: RoutingClass = 'RED'
+): RoutingClass {
+  const u = String(raw ?? '')
+    .trim()
+    .toUpperCase()
+  if (u === 'GREEN' || u === 'YELLOW' || u === 'RED') return u
+  return fallback
+}
+
+export function routingClassColors(route: RoutingClass): { dot: string; text: string } {
+  switch (route) {
+    case 'GREEN':
+      return { dot: '#15803D', text: '#15803D' }
+    case 'YELLOW':
+      return { dot: '#B45309', text: '#B45309' }
+    default:
+      return { dot: '#B91C1C', text: '#B91C1C' }
+  }
+}
+
 export function shortHash(hash?: string | null, head = 10, tail = 4) {
   if (!hash) return '—'
   const s = String(hash)
@@ -87,6 +112,23 @@ export function shortlistSource(a: AgentGuardArtifact) {
   return 'Auto (GREEN)'
 }
 
+export function candidateJobRole(a: AgentGuardArtifact): string | null {
+  const direct = (a.job_role ?? '').trim()
+  const fromContext = (a.workflow_context?.job_role ?? '').trim()
+  const raw = direct || fromContext
+  if (!raw) return null
+  const normalized = raw.replace(/^role:\s*/i, '').trim()
+  return normalized || null
+}
+
+export function candidateEmail(a: AgentGuardArtifact): string | null {
+  const direct = (a.candidate_email ?? '').trim()
+  if (direct) return direct
+  const fromContext = (a.workflow_context?.candidate_email ?? '').trim()
+  if (fromContext) return fromContext
+  return null
+}
+
 export function placeholderEmail(name?: string | null, decisionId?: string | null) {
   const base =
     (name ?? '')
@@ -95,4 +137,25 @@ export function placeholderEmail(name?: string | null, decisionId?: string | nul
       .replace(/^\.+|\.+$/g, '') || 'candidate'
   const suffix = decisionId ? shortHash(decisionId, 6, 4).replace('…', '') : '0000'
   return `${base}.${suffix}@example.com`
+}
+
+export function formatRejectionEmailStatus(
+  result?: { status?: string; email?: string; reason?: string; error?: string } | null
+): string | null {
+  if (!result) return null
+  if (result.status === 'SENT') {
+    return result.email
+      ? `Rejection email sent to ${result.email}.`
+      : 'Rejection email sent.'
+  }
+  if (result.status === 'SKIPPED' && result.reason === 'no_email_on_resume') {
+    return 'Decision saved — no résumé email on file, so no rejection notice was sent.'
+  }
+  if (result.status === 'SKIPPED' && result.reason === 'already_sent') {
+    return 'Decision saved — rejection email was already sent for this candidate.'
+  }
+  if (result.status === 'FAILED') {
+    return result.error ? `Decision saved — rejection email failed: ${result.error}` : 'Decision saved — rejection email failed.'
+  }
+  return null
 }

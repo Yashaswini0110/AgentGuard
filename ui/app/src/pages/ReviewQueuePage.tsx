@@ -7,6 +7,7 @@ import { apiBase, fetchRecentArtifacts, postEscalate, postHumanReview } from '@/
 import {
   artifactHrRowStatus,
   formatArtifactTime,
+  formatRejectionEmailStatus,
   isReviewQueueArtifact,
   modelVersionLabel,
   shapPairs,
@@ -172,6 +173,7 @@ export default function ReviewQueuePage() {
 
   const [rows, setRows] = useState<ReviewRow[]>([])
   const [loadErr, setLoadErr] = useState<string | null>(null)
+  const [actionNotice, setActionNotice] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<'all' | 'blocked' | 'review'>('all')
@@ -229,6 +231,7 @@ export default function ReviewQueuePage() {
 
     setBusyId(actionState.id)
     const note = actionState.note.trim()
+    setActionNotice(null)
     try {
       const reviewerId = user?.id ?? 'HR-UNKNOWN'
       if (actionState.type === 'approve') {
@@ -238,11 +241,13 @@ export default function ReviewQueuePage() {
           reason: note || 'HR override approval recorded from AgentGuard UI.',
         })
       } else if (actionState.type === 'reject') {
-        await postHumanReview(row.decisionId, {
+        const res = await postHumanReview(row.decisionId, {
           action: 'REJECT',
           reviewer_id: reviewerId,
           reason: note || 'Rejected from review queue.',
         })
+        const emailNote = formatRejectionEmailStatus(res.rejection_email)
+        if (emailNote) setActionNotice(emailNote)
       } else if (actionState.type === 'escalate') {
         await postEscalate(row.decisionId, { reviewer_id: reviewerId, note })
       }
@@ -287,6 +292,11 @@ export default function ReviewQueuePage() {
               >
                 Retry
               </button>
+            </p>
+          )}
+          {actionNotice && (
+            <p className="font-sans text-xs mt-2" style={{ color: '#15803D' }}>
+              {actionNotice}
             </p>
           )}
         </div>

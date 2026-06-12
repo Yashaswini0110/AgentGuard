@@ -84,10 +84,13 @@ export async function postHumanReview(
   decisionId: string,
   body: { action: 'APPROVE' | 'REJECT'; reviewer_id: string; reason: string }
 ) {
-  return await httpJson<{ message?: string; artifact?: unknown }>(`/human-review/${encodeURIComponent(decisionId)}`, {
-    method: 'POST',
-    body: JSON.stringify(body),
-  })
+  return await httpJson<import('@/types/agentguard').ReviewActionResponse>(
+    `/human-review/${encodeURIComponent(decisionId)}`,
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }
+  )
 }
 
 export async function postEscalate(decisionId: string, body: { reviewer_id: string; note: string }) {
@@ -138,7 +141,22 @@ export async function postTechReview(
   decisionId: string,
   body: { action: 'ACCEPT' | 'REJECT'; reviewer_id: string; note: string }
 ) {
-  return await httpJson<{ message?: string; artifact?: unknown }>(`/tech-review/${encodeURIComponent(decisionId)}`, {
+  return await httpJson<import('@/types/agentguard').ReviewActionResponse>(
+    `/tech-review/${encodeURIComponent(decisionId)}`,
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }
+  )
+}
+
+export async function postShortlistEmail(body: {
+  decision_ids: string[]
+  subject: string
+  body: string
+  sender_id: string
+}) {
+  return await httpJson<import('@/types/agentguard').ShortlistEmailResponse>('/shortlist/email', {
     method: 'POST',
     body: JSON.stringify(body),
   })
