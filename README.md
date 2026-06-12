@@ -240,7 +240,7 @@ RED decision → ServiceNow REST API → INC0004821 created → Decision PENDING
 | ServiceNow | ServiceNow REST API + Python `requests` |
 | Artifact Engine | Python `hashlib` SHA-256 + `uuid` + `json` |
 | Backend | FastAPI |
-| Frontend | Streamlit |
+| Frontend | React (Vite) dashboard + legacy Streamlit |
 | Database | SQLite → PostgreSQL |
 | Infrastructure | Docker + docker-compose |
 
@@ -255,6 +255,187 @@ RED decision → ServiceNow REST API → INC0004821 created → Decision PENDING
 | Microsoft Purview | ⚠️ MS agents only | ❌ | ❌ |
 | Guardrails AI | ⚠️ Output only | ❌ | ❌ |
 | **AgentGuard v3** | ✅ | ✅ | ✅ |
+
+---
+
+## Usage Guide
+
+### Prerequisites
+
+- **Python 3.10+**
+- **Node.js 18+** (for the React dashboard)
+- API keys in `.env` (see [Environment setup](#environment-setup))
+- For bulk resume ingest: a ZIP of **PDF and/or DOCX** résumés
+
+### Environment setup
+
+1. Copy the example env file and fill in your values:
+
+```bash
+cp .env.example .env
+```
+
+2. Minimum keys for a full demo:
+
+| Variable | Purpose |
+|---|---|
+| `GOOGLE_API_KEY` or `GEMINI_API_KEY` | Resume parsing, worker agent, supervisor |
+| `OPENROUTER_API_KEY` | Optional LLM fallback |
+| `ENVIRONMENT` | `development` = mock email/ServiceNow; `production` = live SMTP |
+| `EMAIL_FROM`, `GMAIL_APP_PASSWORD` | Gmail SMTP for shortlist & rejection mail |
+| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | Optional — inline résumé viewer in Review Queue |
+
+3. **Never commit `.env`** — it is gitignored. Use quotes if your App Password contains special characters:
+
+```env
+GMAIL_APP_PASSWORD="your sixteen char app password"
+```
+
+4. For safe email testing, restrict recipients:
+
+```env
+EMAIL_ALLOWLIST=your.personal@gmail.com
+```
+
+### Run the application
+
+**Terminal 1 — API (from repo root):**
+
+```bash
+pip install -r requirements.txt
+python -m uvicorn api.main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+**Terminal 2 — React UI:**
+
+```bash
+cd ui/app
+npm install
+npm run dev
+```
+
+Open **http://localhost:3000**. The UI proxies API calls to `http://127.0.0.1:8000` via `/agentguard-api`.
+
+Verify the API: **http://127.0.0.1:8000/health** — check `email.transport` (`mock` vs `gmail_smtp`) and `batch_rank_available`.
+
+---
+
+### Demo login
+
+The dashboard uses demo auth (not for production):
+
+| User ID | Role | Password |
+|---|---|---|
+| `HR-COMPLIANCE-01` | HR | `demo` |
+| `TECH-REVIEWER-01` … `03` | Technical reviewer | `demo` |
+
+HR can send shortlist emails and record Review Queue decisions. Tech reviewers handle escalated cases.
+
+---
+
+### End-to-end workflow
+
+#### 1. Bulk Rank (pool intake)
+
+**Tab:** **Bulk rank**
+
+1. Choose a **Target role** preset (Software Engineer, Data Scientist, Frontend Developer) or **Custom** and paste your own JD.
+2. Required skills for the preset appear under the job description.
+3. Set **Open positions** (e.g. `5`).
+4. Upload a **ZIP** of résumés (PDF/DOCX).
+5. Click **Start parallel pool review**.
+
+The pipeline parses each résumé, extracts **name**, **email**, and **skills**, runs governance in parallel, and ranks candidates. Each artifact stores `candidate_email`, `job_role`, and bulk session metadata.
+
+#### 2. Review Queue (HR governance)
+
+**Tab:** **Review Queue** · log in as **HR**
+
+Shows candidates that need human attention: policy **BLOCK**, **RED**, **YELLOW**, or bulk ZIP rows pending HR ack.
+
+| Action | Effect |
+|---|---|
+| **Approve** | HR override — candidate can appear on Shortlist |
+| **Reject** | Records rejection; **sends rejection email** to candidate (if résumé email exists) |
+| **Escalate** | Sends case to **Tech Review** with your note |
+
+When rejecting, add a comment — it is inserted into the rejection email as reviewer feedback.
+
+#### 3. Tech Review (escalated cases)
+
+**Tab:** **Tech Review** · log in as **TECH-REVIEWER-01** (etc.)
+
+Cases appear after HR escalation. Review the résumé and AI summary, add a technical note, then:
+
+| Action | Effect |
+|---|---|
+| **Accept** | Candidate becomes eligible for Shortlist |
+| **Reject** | Records tech rejection; **sends rejection email** with your note |
+
+#### 4. Shortlist & Email (accepted candidates)
+
+**Tab:** **Shortlist & Email** · log in as **HR**
+
+Lists candidates who passed via GREEN auto-pass, supervisor approve, HR approve, or tech accept.
+
+1. Select candidates (must have a **real résumé email** — not `@example.com`).
+2. Edit subject/body if needed. Placeholders are filled per recipient:
+   - `[Candidate Name]`
+   - `[Role Title]` (from bulk JD / artifact)
+3. Click **Send**.
+
+| `ENVIRONMENT` | Behaviour |
+|---|---|
+| `development` | Mock — payload printed in API terminal (`[MOCK] Shortlist email payload`) |
+| `production` | Real Gmail SMTP send |
+
+Successful sends write `email_dispatch` on the artifact for audit.
+
+#### 5. Single candidate (optional)
+
+**Tab:** **Run pipeline**
+
+Run governance on one synthetic or parsed candidate without bulk ZIP. Useful for policy demos (e.g. emotion_score → RED).
+
+---
+
+### Email templates
+
+**Shortlist (manual send from Shortlist tab)**
+
+- Subject: `AgentGuard – Application Shortlisted for Interview Process`
+- Includes next-step interview messaging and contact `agentguard.hr@gmail.com` / `+91 9000000001`
+
+**Rejection (automatic on HR or Tech Reject)**
+
+- Subject: `AgentGuard – Update on Your Application`
+- Placeholders: `[Candidate Name]`, `[Role Title]`, `[REJECTION_REASON_OR_REVIEWER_COMMENT]`
+- Skipped if no résumé email or rejection mail already sent (`rejection_email_dispatch` on artifact)
+
+### Gmail App Password (production email)
+
+1. Enable **2-Step Verification** on the sender Gmail account.
+2. Google Account → Security → **App passwords** → generate for Mail.
+3. Put the 16-character password in `GMAIL_APP_PASSWORD` (not your normal login password).
+4. Set `ENVIRONMENT=production` and restart uvicorn.
+
+---
+
+### API endpoints (reference)
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/decision` | Single-candidate governance pipeline |
+| `POST` | `/batch_rank` | Bulk ZIP ingest + merit rank |
+| `POST` | `/batch_rank/stream` | Same with SSE progress |
+| `POST` | `/human-review/{id}` | HR approve / reject |
+| `POST` | `/escalate/{id}` | HR → tech escalation |
+| `POST` | `/tech-review/{id}` | Tech accept / reject |
+| `POST` | `/shortlist/email` | HR shortlist notification batch send |
+| `GET` | `/artifacts/recent` | Dashboard artifact feed |
+| `GET` | `/health` | Liveness + email/ batch flags |
+
+Interactive docs: **http://127.0.0.1:8000/docs**
 
 ---
 
