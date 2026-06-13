@@ -96,6 +96,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.on_event("startup")
+def _load_policies_on_startup() -> None:
+    """F2: load active policies from Supabase into the engine; on any failure the
+    engine keeps its hardcoded defaults so startup never breaks."""
+    try:
+        from core import policy_store
+        status = policy_store.refresh_active_policies()
+        logger.info("policy load: source=%s count=%s", status.get("source"), status.get("count"))
+    except Exception as exc:
+        logger.warning("policy startup load failed, using defaults: %s", exc)
+
 # ---------------------------------------------------------------------------
 # Request-timing middleware
 # ---------------------------------------------------------------------------

@@ -115,6 +115,32 @@ def set_policy_active(policy_id: str, is_active: bool, changed_by: str) -> Optio
     return rows[0]
 
 
+def refresh_active_policies() -> dict:
+    """
+    Load active policies from Supabase into the engine's in-memory cache. Used
+    at startup and as the hot-reload after an activate/deactivate.
+
+    Falls back to the hardcoded defaults if the database is unavailable, so
+    enforcement is never lost (PRD §5.1). Returns a small status dict.
+    """
+    try:
+        seed_defaults_if_empty()  # ensure a fresh DB still carries the baseline
+        rules = load_active_policies()
+        if not rules:
+            policy_engine.reset_to_default_policies()
+            return {"source": "default", "count": len(policy_engine.get_active_policies())}
+        policy_engine.set_active_policies(rules)
+        return {"source": "database", "count": len(rules)}
+    except Exception as exc:
+        policy_engine.reset_to_default_policies()
+        logger.warning("policy DB unavailable; using hardcoded defaults: %s", exc)
+        return {
+            "source": "fallback",
+            "count": len(policy_engine.get_active_policies()),
+            "error": str(exc),
+        }
+
+
 def seed_defaults_if_empty() -> int:
     """
     Populate the policies table with the hardcoded defaults (ACTIVE) when it is
