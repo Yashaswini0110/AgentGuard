@@ -54,6 +54,7 @@ from core.drift import compute_drift_status
 from core import retrain as retrain_service
 from core import drift_alert
 from core import policy_store, policy_engine
+from core.policy_extract import extract_rules_from_text
 from core.sync_pipeline import sync_governance_pipeline
 from core.artifact_engine import export_for_regulator
 from core.resume_parser import extract_text_from_pdf, parse_resume
@@ -678,6 +679,49 @@ async def list_policies():
     return {"count": len(rows), "policies": [_policy_view(r) for r in rows]}
 
 
+@app.post("/admin/policies/pdf", status_code=201,
+          summary="F2: extract policy rules from a PDF via Gemini (saved INACTIVE)")
+async def create_policies_from_pdf(
+    file: UploadFile = File(...),
+    uploaded_by: str = Form("admin"),
+):
+    """
+    Upload a policy/regulation PDF (e.g. the DPDP Act). The LLM proposes
+    structured rule candidates; each is saved INACTIVE for admin review.
+    """
+    if file.content_type not in ("application/pdf", "application/x-pdf"):
+        raise HTTPException(status_code=415, detail="Only PDF files are supported.")
+    text = extract_text_from_pdf(await file.read())
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="No text could be extracted from this PDF.")
+    try:
+        candidates = extract_rules_from_text(text)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Rule extraction failed: {exc}")
+
+    created: list[dict] = []
+    skipped: list[dict] = []
+    for cand in candidates:
+        name = cand.get("name") if isinstance(cand, dict) else None
+        content = {k: cand.get(k) for k in ("severity", "regulation", "reason", "condition")} \
+            if isinstance(cand, dict) else {}
+        ok, err = policy_engine.validate_rule_content(content)
+        if not name or not ok:
+            skipped.append({"name": name, "error": err or "missing name"})
+            continue
+        try:
+            row = policy_store.insert_policy(name, content, uploaded_by, source="pdf", is_active=False)
+            created.append(_policy_view(row))
+        except Exception as exc:
+            skipped.append({"name": name, "error": str(exc)})
+
+    return {
+        "created": created,
+        "skipped": skipped,
+        "message": f"{len(created)} rule(s) extracted (inactive). Review and activate.",
+    }
+
+
 @app.patch("/admin/policies/{policy_id}", summary="F2: activate/deactivate a policy (hot-reload)")
 async def toggle_policy(policy_id: str, body: PolicyToggle):
     try:
@@ -688,7 +732,9 @@ async def toggle_policy(policy_id: str, body: PolicyToggle):
         raise HTTPException(status_code=404, detail=f"Policy '{policy_id}' not found.")
     # Hot-reload the engine cache so the change takes effect immediately.
     policy_store.refresh_active_policies()
-    return _policy_view(updated)
+    view = _policy_view(updated)
+    view["retired_versions"] = updated.get("retired_version_ids", [])
+    return view
 
 
 # ---------------------------------------------------------------------------

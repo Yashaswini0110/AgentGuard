@@ -102,8 +102,32 @@ def insert_policy(name: str, content_json: dict, uploaded_by: str,
     return created
 
 
+def retire_other_active_versions(name: str, keep_id: str, changed_by: str) -> list[str]:
+    """
+    Deactivate any OTHER active policy that shares this name, so at most one
+    version of a rule is ever active. Superseded rows are kept (history), just
+    flipped inactive. Returns the retired ids.
+    """
+    if not name:
+        return []
+    resp = (
+        _get_client().table(POLICIES_TABLE).select("id")
+        .eq("name", name).eq("is_active", True).neq("id", keep_id).execute()
+    )
+    retired: list[str] = []
+    for row in (resp.data or []):
+        rid = row["id"]
+        _get_client().table(POLICIES_TABLE).update({"is_active": False}).eq("id", rid).execute()
+        append_audit(rid, "DEACTIVATE", changed_by, detail=f"auto-retired: superseded by {keep_id}")
+        retired.append(rid)
+    return retired
+
+
 def set_policy_active(policy_id: str, is_active: bool, changed_by: str) -> Optional[dict]:
-    """Activate/deactivate a policy (no delete) and log it."""
+    """
+    Activate/deactivate a policy (no delete) and log it. On activation, any other
+    active rule with the same name is auto-retired so only one version enforces.
+    """
     resp = (
         _get_client().table(POLICIES_TABLE).update({"is_active": is_active})
         .eq("id", policy_id).execute()
@@ -111,8 +135,13 @@ def set_policy_active(policy_id: str, is_active: bool, changed_by: str) -> Optio
     rows = resp.data or []
     if not rows:
         return None
+    updated = rows[0]
     append_audit(policy_id, "ACTIVATE" if is_active else "DEACTIVATE", changed_by)
-    return rows[0]
+    updated["retired_version_ids"] = (
+        retire_other_active_versions(updated.get("name"), keep_id=policy_id, changed_by=changed_by)
+        if is_active else []
+    )
+    return updated
 
 
 def refresh_active_policies() -> dict:

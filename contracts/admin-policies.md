@@ -22,18 +22,20 @@ an admin before it enforces.
 Condition types: `feature_present` (`match`: `any`|`all` of `features`) ·
 `pattern_match` (`patterns` found in `target`, e.g. `raw_input`).
 
-## `POST /admin/policies`
-Create policy rule(s). Accepts **either**:
-- **JSON body** — one rule: `{ name, content_json, uploaded_by }`
-- **multipart PDF** — `file=<pdf>`, `uploaded_by=<str>`: text is extracted and
-  Gemini proposes one or more rule candidates (each saved INACTIVE for review).
+## `POST /admin/policies` (JSON)
+Create one rule from a JSON body: `{ name, content_json, uploaded_by }`. Lands INACTIVE.
 
-**Response `201`:**
+## `POST /admin/policies/pdf` (multipart)
+Upload a policy/regulation PDF: `file=<pdf>`, `uploaded_by=<str>`. Text is
+extracted and Gemini proposes rule candidates, each saved INACTIVE for review.
+
+**Response `201`** (both routes):
 ```json
 { "created": [ { "id": "uuid", "name": "...", "is_active": false, "severity": "RED", "source": "json|pdf" } ],
-  "message": "1 rule created (inactive). Review and activate." }
+  "skipped": [ { "name": "...", "error": "..." } ],
+  "message": "N rule(s) created (inactive). Review and activate." }
 ```
-Errors: `400` invalid rule shape · `415` non-PDF upload · `502` extraction failed.
+Errors: `400` invalid rule shape / empty PDF · `415` non-PDF upload · `502` extraction failed · `503` policy DB unavailable.
 
 ## `GET /admin/policies`
 List all policies for the admin view.
