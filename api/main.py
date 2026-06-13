@@ -35,7 +35,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from fastapi import Body, FastAPI, HTTPException, Request, UploadFile, File, Form
+from fastapi import Body, FastAPI, HTTPException, Request, UploadFile, File, Form, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
@@ -51,6 +51,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from core.risk_router import check_drift, load_model_meta
 from core.drift import compute_drift_status
+from core import retrain as retrain_service
 from core.sync_pipeline import sync_governance_pipeline
 from core.artifact_engine import export_for_regulator
 from core.resume_parser import extract_text_from_pdf, parse_resume
@@ -576,6 +577,27 @@ async def drift_status():
 
     baseline = float(load_model_meta().get("baseline_red_rate", 0.15))
     return compute_drift_status(artifacts, baseline)
+
+
+@app.post("/admin/retrain", status_code=202, summary="F5.2: trigger a background router retrain")
+async def admin_retrain(background: BackgroundTasks):
+    """
+    Retrain the risk router on the synthetic baseline + accumulated real
+    decisions, then hot-swap only if the challenger matches/beats the incumbent.
+    Runs in the background; poll GET /admin/retrain/status. Contract:
+    contracts/admin-retrain.md.
+
+    NOTE: Admin-role gating arrives with F1/F8 (no admin role exists yet).
+    """
+    result = retrain_service.start_retrain(background)
+    if result is None:
+        raise HTTPException(status_code=409, detail="A retrain job is already running.")
+    return result
+
+
+@app.get("/admin/retrain/status", summary="F5.2: poll the retrain job state")
+async def admin_retrain_status():
+    return retrain_service.get_status()
 
 
 # ---------------------------------------------------------------------------

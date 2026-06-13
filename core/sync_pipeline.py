@@ -85,6 +85,10 @@ def sync_governance_pipeline(
         "shap_scores": router_result.get("shap_scores", {}),
         "model_version_hash": router_result.get("model_version_hash", "unknown"),
     }
+    if not policy_blocked:
+        # Persist the router's raw input features so this decision is retrainable
+        # later (F5 retrain on accumulated artifacts).
+        normalised_router["router_features"] = router_input
     if policy_blocked:
         normalised_router["routing_classification"] = "RED"
 

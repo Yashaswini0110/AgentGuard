@@ -76,6 +76,10 @@ def generate_artifact(
         "servicenow_ticket_id":    servicenow_ticket_id,
     }
 
+    router_features = router_result.get("router_features")
+    if isinstance(router_features, dict) and router_features:
+        artifact_body["router_features"] = router_features
+
     if supervisor_result is not None:
         artifact_body["supervisor_review"] = supervisor_result
 

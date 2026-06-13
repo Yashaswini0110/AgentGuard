@@ -8,8 +8,10 @@ Target latency: < 50ms per inference call.
 import os
 import time
 import json
+import shutil
 import datetime
 import hashlib
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -114,28 +116,17 @@ def load_model_meta() -> dict:
 # PART A — Training
 # ─────────────────────────────────────────────────────────────────────────────
 
-def train_router(dataset_path: str) -> None:
+def fit_router_from_frame(df: pd.DataFrame) -> dict:
     """
-    Train a GradientBoostingClassifier on the provided CSV dataset.
-
-    Parameters
-    ----------
-    dataset_path : str
-        Path to a CSV file containing hiring decision records.
-        Required columns: years_of_experience, skill_match_score,
-        interview_score, assessment_score, decision_confidence, feature_count.
-        Optional column: risk_label (GREEN / YELLOW / RED).
-        If risk_label is absent it is derived from confidence + feature_count rules.
+    Fit a GradientBoostingClassifier on a feature frame and return the trained
+    bundle, evaluation metrics, the training baseline, and the held-out test
+    split. Exposing the test split lets a retrain compare a challenger model
+    against the incumbent on identical data.
     """
-    print(f"[train_router] Loading dataset from: {dataset_path}")
-    df = pd.read_csv(dataset_path)
-
-    # ── Derive labels if missing ──────────────────────────────────────────────
     if "risk_label" not in df.columns:
-        print("[train_router] 'risk_label' column not found — deriving from rules.")
+        df = df.copy()
         df["risk_label"] = df.apply(_derive_risk_label, axis=1)
 
-    # ── Validate required feature columns ─────────────────────────────────────
     missing = [c for c in SAFE_FEATURES if c not in df.columns]
     if missing:
         raise ValueError(f"Dataset is missing required feature columns: {missing}")
@@ -143,7 +134,6 @@ def train_router(dataset_path: str) -> None:
     X = df[SAFE_FEATURES].astype(float)
     y_raw = df["risk_label"].astype(str).str.strip().str.upper()
 
-    # ── Encode labels ─────────────────────────────────────────────────────────
     label_order = ["GREEN", "YELLOW", "RED"]
     le = LabelEncoder()
     le.fit(label_order)
@@ -153,13 +143,7 @@ def train_router(dataset_path: str) -> None:
         X, y, test_size=0.2, random_state=42, stratify=y
     )
 
-    # ── Train ─────────────────────────────────────────────────────────────────
-    # Regularisation choices:
-    #   max_depth=3        — shallower trees generalise better
-    #   n_estimators=100   — enough capacity without overfitting noisy labels
-    #   min_samples_leaf=20 — each leaf needs real support, not 1-2 samples
-    #   min_samples_split=40 — stops splitting on tiny subgroups
-    #   subsample=0.8      — stochastic boosting reduces variance
+    # Regularisation: shallow trees + leaf/ split floors generalise on noisy labels.
     clf = GradientBoostingClassifier(
         n_estimators=100,
         max_depth=3,
@@ -169,66 +153,86 @@ def train_router(dataset_path: str) -> None:
         min_samples_split=40,
         random_state=42,
     )
-    print("[train_router] Training GradientBoostingClassifier ...")
     clf.fit(X_train, y_train)
 
-    # ── Evaluate ──────────────────────────────────────────────────────────────
-    y_pred = clf.predict(X_test)
-    test_acc = accuracy_score(y_test, y_pred)
-
-    # 5-fold stratified CV on the full training set
+    test_acc = accuracy_score(y_test, clf.predict(X_test))
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
     cv_scores = cross_val_score(clf, X_train, y_train, cv=cv, scoring="accuracy")
 
-    print(f"\n[train_router] Hold-out test accuracy : {test_acc:.4f}")
-    print(f"[train_router] CV accuracy (5-fold)   : {cv_scores.mean():.4f} "
-          f"(± {cv_scores.std():.4f})")
-    print("\n[train_router] Classification report (hold-out test set):")
-    print(
-        classification_report(
-            y_test, y_pred, target_names=le.inverse_transform([0, 1, 2])
-        )
-    )
-
-    # ── Persist model + label encoder + SHAP background as a bundle ───────────
-    _ensure_model_dir()
-    # Keep a small background sample (10 rows) for SHAP's PermutationExplainer.
-    # Fewer rows = much faster SHAP init and inference while still meaningful.
+    # Small SHAP background sample keeps the PermutationExplainer fast.
     bg_size = min(10, len(X_train))
     background = X_train.sample(n=bg_size, random_state=42)
     bundle = {"classifier": clf, "label_encoder": le, "shap_background": background}
-    joblib.dump(bundle, MODEL_PATH)
-    print(f"[train_router] Model saved to: {MODEL_PATH}")
 
-    # ── SHA-256 hash ──────────────────────────────────────────────────────────
-    model_hash = _sha256_file(MODEL_PATH)
-    with open(HASH_PATH, "w") as f:
-        f.write(model_hash)
-    print(f"[train_router] Model hash  : {model_hash}")
-    print(f"[train_router] Hash saved  : {HASH_PATH}")
-
-    # ── F5: persist training metadata + drift baseline ────────────────────────
-    # baseline_red_rate = honest RED fraction of the training label distribution.
-    # This is the reference the rolling 7-day RED rate is compared against.
-    baseline_red_rate = float((y_raw == "RED").mean())
-    meta = {
-        "baseline_red_rate": round(baseline_red_rate, 6),
-        "model_version_hash": model_hash,
-        "trained_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        "train_accuracy": round(float(test_acc), 6),
-        "cv_accuracy": round(float(cv_scores.mean()), 6),
+    return {
+        "bundle": bundle,
+        "test_acc": float(test_acc),
+        "cv_acc": float(cv_scores.mean()),
+        "baseline_red_rate": float((y_raw == "RED").mean()),
         "n_samples": int(len(df)),
         "label_distribution": {
             "GREEN": int((y_raw == "GREEN").sum()),
             "YELLOW": int((y_raw == "YELLOW").sum()),
             "RED": int((y_raw == "RED").sum()),
         },
-        "source": "train_router",
+        "X_test": X_test,
+        "y_test": y_test,
+    }
+
+
+def persist_router_bundle(fit_result: dict, source: str = "train_router") -> dict:
+    """
+    Write model + hash + metadata (drift baseline) from a fit_router_from_frame
+    result. This is the atomic swap step: callers archive the incumbent first.
+    """
+    _ensure_model_dir()
+    joblib.dump(fit_result["bundle"], MODEL_PATH)
+    model_hash = _sha256_file(MODEL_PATH)
+    with open(HASH_PATH, "w") as f:
+        f.write(model_hash)
+
+    meta = {
+        "baseline_red_rate": round(fit_result["baseline_red_rate"], 6),
+        "model_version_hash": model_hash,
+        "trained_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "train_accuracy": round(fit_result["test_acc"], 6),
+        "cv_accuracy": round(fit_result["cv_acc"], 6),
+        "n_samples": fit_result["n_samples"],
+        "label_distribution": fit_result["label_distribution"],
+        "source": source,
     }
     with open(META_PATH, "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=2)
-    print(f"[train_router] Baseline RED: {baseline_red_rate:.4f}")
-    print(f"[train_router] Meta saved  : {META_PATH}")
+    return meta
+
+
+def archive_current_model() -> Optional[str]:
+    """
+    Copy the live model to models/archive/<old_hash>.pkl so a swap is reversible.
+    Returns the archive path, or None if there is no current model.
+    """
+    if not os.path.exists(MODEL_PATH):
+        return None
+    archive_dir = os.path.join(MODEL_DIR, "archive")
+    os.makedirs(archive_dir, exist_ok=True)
+    dest = os.path.join(archive_dir, f"{_load_hash()}.pkl")
+    shutil.copy2(MODEL_PATH, dest)
+    return dest
+
+
+def evaluate_bundle(bundle: dict, X_test, y_test) -> float:
+    """Accuracy of a bundle's classifier on an (already label-encoded) test set."""
+    return float(accuracy_score(y_test, bundle["classifier"].predict(X_test)))
+
+
+def train_router(dataset_path: str) -> dict:
+    """Train + persist the router from a CSV dataset (CLI / bootstrap entrypoint)."""
+    print(f"[train_router] Loading dataset from: {dataset_path}")
+    result = fit_router_from_frame(pd.read_csv(dataset_path))
+    meta = persist_router_bundle(result, source="train_router")
+    print(f"[train_router] test_acc={meta['train_accuracy']} cv_acc={meta['cv_accuracy']} "
+          f"baseline_red={meta['baseline_red_rate']} hash={meta['model_version_hash'][:12]}")
+    return meta
 
 
 # ─────────────────────────────────────────────────────────────────────────────
