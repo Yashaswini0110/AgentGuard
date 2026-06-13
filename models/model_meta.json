@@ -1,0 +1,14 @@
+{
+  "baseline_red_rate": 0.2526,
+  "model_version_hash": "e66d87bb040ca2b484569e260f33ad4329a647effdc2935ee34ca8fce06c8b0a",
+  "trained_at": null,
+  "train_accuracy": null,
+  "cv_accuracy": null,
+  "n_samples": 5000,
+  "label_distribution": {
+    "GREEN": 963,
+    "YELLOW": 2774,
+    "RED": 1263
+  },
+  "source": "baseline_backfill"
+}

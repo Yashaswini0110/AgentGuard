@@ -7,6 +7,8 @@ Target latency: < 50ms per inference call.
 
 import os
 import time
+import json
+import datetime
 import hashlib
 
 import numpy as np
@@ -34,6 +36,10 @@ SAFE_FEATURES = [
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "..", "models")
 MODEL_PATH = os.path.join(MODEL_DIR, "router_model.pkl")
 HASH_PATH = os.path.join(MODEL_DIR, "model_version_hash.txt")
+META_PATH = os.path.join(MODEL_DIR, "model_meta.json")
+
+# Fallback RED baseline used when no model_meta.json exists yet (F5 drift).
+DEFAULT_BASELINE_RED_RATE = 0.15
 
 # Module-level cache: avoids rebuilding PermutationExplainer on every call.
 _EXPLAINER_CACHE: dict = {}
@@ -81,6 +87,27 @@ def _load_hash() -> str:
         return "unknown"
     with open(HASH_PATH, "r") as f:
         return f.read().strip()
+
+
+def load_model_meta() -> dict:
+    """
+    Read models/model_meta.json (training baseline + provenance for F5 drift).
+
+    Falls back to a safe default if the file is missing or unreadable so callers
+    (e.g. /drift/status) never crash on a fresh or partially-set-up install.
+    """
+    try:
+        with open(META_PATH, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+        if isinstance(meta, dict) and "baseline_red_rate" in meta:
+            return meta
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        pass
+    return {
+        "baseline_red_rate": DEFAULT_BASELINE_RED_RATE,
+        "model_version_hash": _load_hash(),
+        "source": "default",
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -179,6 +206,29 @@ def train_router(dataset_path: str) -> None:
         f.write(model_hash)
     print(f"[train_router] Model hash  : {model_hash}")
     print(f"[train_router] Hash saved  : {HASH_PATH}")
+
+    # ── F5: persist training metadata + drift baseline ────────────────────────
+    # baseline_red_rate = honest RED fraction of the training label distribution.
+    # This is the reference the rolling 7-day RED rate is compared against.
+    baseline_red_rate = float((y_raw == "RED").mean())
+    meta = {
+        "baseline_red_rate": round(baseline_red_rate, 6),
+        "model_version_hash": model_hash,
+        "trained_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "train_accuracy": round(float(test_acc), 6),
+        "cv_accuracy": round(float(cv_scores.mean()), 6),
+        "n_samples": int(len(df)),
+        "label_distribution": {
+            "GREEN": int((y_raw == "GREEN").sum()),
+            "YELLOW": int((y_raw == "YELLOW").sum()),
+            "RED": int((y_raw == "RED").sum()),
+        },
+        "source": "train_router",
+    }
+    with open(META_PATH, "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=2)
+    print(f"[train_router] Baseline RED: {baseline_red_rate:.4f}")
+    print(f"[train_router] Meta saved  : {META_PATH}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

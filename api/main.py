@@ -49,7 +49,8 @@ import sys
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from core.risk_router import check_drift
+from core.risk_router import check_drift, load_model_meta
+from core.drift import compute_drift_status
 from core.sync_pipeline import sync_governance_pipeline
 from core.artifact_engine import export_for_regulator
 from core.resume_parser import extract_text_from_pdf, parse_resume
@@ -544,6 +545,37 @@ async def drift_report():
     drift = check_drift(risk_levels)
     drift["artifacts_analysed"] = len(risk_levels)
     return drift
+
+
+@app.get("/drift/status", summary="F5 drift signal: rolling RED rate vs training baseline")
+async def drift_status():
+    """
+    Compare the rolling 7-day RED rate against the model's training baseline
+    (models/model_meta.json). Drift is flagged when the daily RED rate exceeds
+    baseline x 1.5 for 3 consecutive days. Contract: contracts/drift-status.md.
+
+    Reads artifacts from the filesystem today; this is the only part that changes
+    when F9 moves artifacts into Supabase.
+    """
+    ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Load recent artifacts (newest by mtime). compute_drift_status filters to the
+    # trailing window by each artifact's own timestamp field.
+    files = sorted(
+        ARTIFACTS_DIR.glob("*.json"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )[:2000]
+    artifacts: list[dict] = []
+    for fp in files:
+        try:
+            with open(fp, encoding="utf-8") as fh:
+                artifacts.append(json.load(fh))
+        except Exception:
+            pass  # skip corrupt files
+
+    baseline = float(load_model_meta().get("baseline_red_rate", 0.15))
+    return compute_drift_status(artifacts, baseline)
 
 
 # ---------------------------------------------------------------------------
