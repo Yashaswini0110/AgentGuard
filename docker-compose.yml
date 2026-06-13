@@ -1,0 +1,43 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    image: agentguard-backend
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000
+    env_file:
+      - .env
+    ports:
+      - "8010:8000"
+    volumes:
+      - ./artifacts:/app/artifacts
+    restart: unless-stopped
+
+  streamlit:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    image: agentguard-backend
+    command: streamlit run ui/dashboard.py --server.port 8501 --server.address 0.0.0.0
+    env_file:
+      - .env
+    environment:
+      - AGENTGUARD_API_BASE=http://api:8000
+    ports:
+      - "8502:8501"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./ui/app
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: /agentguard-api
+    image: agentguard-web
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
+    restart: unless-stopped

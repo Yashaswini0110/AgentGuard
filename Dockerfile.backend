@@ -1,0 +1,28 @@
+# Shared image for the FastAPI backend and the Streamlit dashboard.
+# The compose file overrides the command per service.
+FROM python:3.13-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+# Install dependencies first for better layer caching.
+COPY requirements.txt ./
+RUN pip install --upgrade pip && pip install -r requirements.txt
+
+# Application code needed at runtime.
+COPY api/ ./api/
+COPY core/ ./core/
+COPY models/ ./models/
+COPY data/ ./data/
+COPY ui/dashboard.py ./ui/dashboard.py
+
+# Artifacts are written here at runtime; compose bind-mounts over it.
+RUN mkdir -p /app/artifacts
+
+EXPOSE 8000 8501
+
+# Default to the API; the streamlit service overrides this.
+CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]

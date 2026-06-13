@@ -12,7 +12,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from core.resume_parser import extract_text_from_pdf, parse_resume
 
 # Configuration
-BASE_URL = "http://127.0.0.1:8000"
+BASE_URL = os.getenv("AGENTGUARD_API_BASE", "http://127.0.0.1:8000")
 st.set_page_config(page_title="AgentGuard v3 — AI Governance", layout="wide", page_icon="🛡️")
 
 # Initialize Session State
