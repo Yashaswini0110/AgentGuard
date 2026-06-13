@@ -18,44 +18,73 @@ from __future__ import annotations
 # Policy Rule Registry
 # ---------------------------------------------------------------------------
 
+# Injection patterns for the prompt-injection rule (case-insensitive matching).
+_INJECTION_PATTERNS: tuple[str, ...] = (
+    "ignore previous",
+    "system prompt",
+    "override",
+    "jailbreak",
+    "forget instructions",
+)
+
+# Each enforced rule carries a structured ``condition`` so the engine is fully
+# data-driven (F2): the same shape is stored as content_json in the Supabase
+# ``policies`` table, and these defaults are the silent fallback when the DB is
+# unavailable. Supported condition types:
+#   feature_present  — fires if `match` ("any"|"all") of `features` are used
+#   pattern_match    — fires if any of `patterns` appears in `target` text
 POLICY_RULES: dict[str, dict] = {
     "EMOTION_SCORE_IN_HIRING_PROHIBITED": {
         "severity": "RED",
         "regulation": "EU AI Act Article 5(1)(f) — Prohibited Practice",
         "reason": "Emotion recognition in employment contexts is a flat legal prohibition",
-        # Condition evaluated in check_policy: "emotion_score" in features_used
+        "condition": {"type": "feature_present", "features": ["emotion_score"], "match": "any"},
     },
     "SURNAME_PROXY_CASTE_RELIGION": {
         "severity": "RED",
         "regulation": "India Constitution Article 15 — Anti-discrimination",
         "reason": "Applicant surname is a proxy for caste and religious identity in India",
-        # Condition: "applicant_surname" in features_used
+        "condition": {"type": "feature_present", "features": ["applicant_surname"], "match": "any"},
     },
     "INSTITUTION_TIER_PROXY_SOCIOECONOMIC": {
         "severity": "RED",
         "regulation": "India DPDP Act 2023 — Unlawful data processing",
         "reason": "Institution tier correlates with caste and socioeconomic background",
-        # Condition: "institution_tier" in features_used
+        "condition": {"type": "feature_present", "features": ["institution_tier"], "match": "any"},
     },
     "MATERNITY_DISCRIMINATION_PROXY": {
         "severity": "RED",
         "regulation": "Maternity Benefit Act 1961 — India",
         "reason": "Career gap combined with gender is a maternity discrimination proxy",
-        # Condition: "career_gap_months" AND "applicant_gender" both in features_used
+        "condition": {
+            "type": "feature_present",
+            "features": ["career_gap_months", "applicant_gender"],
+            "match": "all",
+        },
     },
     "TRIBAL_IDENTITY_PROXY": {
         "severity": "RED",
         "regulation": "India Constitution Article 15 — Anti-discrimination",
         "reason": "Geographic micro-codes are proxies for tribal and rural identity",
-        # Condition: "home_district" OR "village_code" in features_used
+        "condition": {
+            "type": "feature_present",
+            "features": ["home_district", "village_code"],
+            "match": "any",
+        },
     },
     "PROMPT_INJECTION_DETECTED": {
         "severity": "RED",
         "regulation": "AgentGuard Security Policy v1.0",
         "reason": "Malicious instruction injection detected in candidate input",
-        # Condition: raw_input contains any injection pattern (case-insensitive)
+        "condition": {
+            "type": "pattern_match",
+            "patterns": list(_INJECTION_PATTERNS),
+            "target": "raw_input",
+        },
     },
     "QUOTA_EXHAUSTION_WITHOUT_POOL_REVIEW": {
+        # Organisational (YELLOW) latch — evaluated by evaluate_pool_quota_rule,
+        # not part of the per-decision check_policy pass. No ``condition``.
         "severity": "YELLOW",
         "regulation": "AgentGuard Pool-First Governance Policy v1.0",
         "reason": (
@@ -69,23 +98,62 @@ POLICY_RULES: dict[str, dict] = {
 # Minimum share of the pool that must complete governance review before finalize.
 MIN_POOL_REVIEW_THRESHOLD: float = 0.80
 
-# Injection patterns for Rule 6 (lowercased for case-insensitive matching)
-_INJECTION_PATTERNS: tuple[str, ...] = (
-    "ignore previous",
-    "system prompt",
-    "override",
-    "jailbreak",
-    "forget instructions",
-)
-
 
 # ---------------------------------------------------------------------------
 # Core Policy Check
 # ---------------------------------------------------------------------------
 
+def _default_enforced_rules() -> list[dict]:
+    """The hardcoded enforced rules as a flat list (name + metadata + condition).
+
+    This is the silent fallback policy set used when the policy database is
+    unavailable (F2 §5.1). The quota rule is excluded — it has no ``condition``.
+    """
+    return [
+        {"name": name, **meta}
+        for name, meta in POLICY_RULES.items()
+        if "condition" in meta
+    ]
+
+
+# In-memory active policy set. Defaults to the hardcoded rules; the policy
+# database (F2) replaces this at startup and on hot-reload via set_active_policies.
+_ACTIVE_POLICIES: list[dict] = _default_enforced_rules()
+
+
+def set_active_policies(rules: list[dict]) -> None:
+    """Replace the active policy set (used by DB startup load + hot-reload)."""
+    global _ACTIVE_POLICIES
+    _ACTIVE_POLICIES = list(rules)
+
+
+def get_active_policies() -> list[dict]:
+    """Return a copy of the active policy set."""
+    return list(_ACTIVE_POLICIES)
+
+
+def reset_to_default_policies() -> None:
+    """Restore the hardcoded fallback rules (e.g. if the DB becomes unavailable)."""
+    set_active_policies(_default_enforced_rules())
+
+
+def _condition_fires(condition: dict, features_set: set[str], raw_lower: str) -> bool:
+    """Generic evaluator for a single rule condition."""
+    ctype = condition.get("type")
+    if ctype == "feature_present":
+        feats = condition.get("features", [])
+        if condition.get("match") == "all":
+            return bool(feats) and all(f in features_set for f in feats)
+        return any(f in features_set for f in feats)
+    if ctype == "pattern_match":
+        patterns = condition.get("patterns", [])
+        return any(str(p).lower() in raw_lower for p in patterns)
+    return False  # unknown condition type never fires
+
+
 def check_policy(decision: dict, raw_input: str = "") -> dict:
     """
-    Evaluate a hiring decision against all AgentGuard policy rules.
+    Evaluate a hiring decision against the active AgentGuard policy rules.
 
     Args:
         decision:   A dict representing the AI hiring decision. Must contain a
@@ -101,46 +169,22 @@ def check_policy(decision: dict, raw_input: str = "") -> dict:
                                           rule_name, severity, regulation, reason.
           - ``recommended_action`` (str)   "PROCEED" | "BLOCK"
 
-    Performance guarantee: pure Python dict/set operations; runs in < 5 ms.
+    Rules are read from the in-memory active policy set (DB-backed or hardcoded
+    fallback). Pure dict/set operations; runs in < 5 ms.
     """
-    features_used: list[str] = decision.get("features_used", [])
-    features_set: set[str] = set(features_used)          # O(1) lookups
+    features_set: set[str] = set(decision.get("features_used", []))   # O(1) lookups
     raw_lower: str = raw_input.lower()
 
     violations: list[dict] = []
-
-    def _add_violation(rule_name: str) -> None:
-        rule = POLICY_RULES[rule_name]
-        violations.append({
-            "rule_name": rule_name,
-            "severity": rule["severity"],
-            "regulation": rule["regulation"],
-            "reason": rule["reason"],
-        })
-
-    # --- Rule 1: Emotion score in hiring ---
-    if "emotion_score" in features_set:
-        _add_violation("EMOTION_SCORE_IN_HIRING_PROHIBITED")
-
-    # --- Rule 2: Surname → caste / religion proxy ---
-    if "applicant_surname" in features_set:
-        _add_violation("SURNAME_PROXY_CASTE_RELIGION")
-
-    # --- Rule 3: Institution tier → socioeconomic proxy ---
-    if "institution_tier" in features_set:
-        _add_violation("INSTITUTION_TIER_PROXY_SOCIOECONOMIC")
-
-    # --- Rule 4: Career gap + gender → maternity discrimination proxy ---
-    if "career_gap_months" in features_set and "applicant_gender" in features_set:
-        _add_violation("MATERNITY_DISCRIMINATION_PROXY")
-
-    # --- Rule 5: Geographic micro-codes → tribal identity proxy ---
-    if "home_district" in features_set or "village_code" in features_set:
-        _add_violation("TRIBAL_IDENTITY_PROXY")
-
-    # --- Rule 6: Prompt injection in raw candidate input ---
-    if any(pattern in raw_lower for pattern in _INJECTION_PATTERNS):
-        _add_violation("PROMPT_INJECTION_DETECTED")
+    for rule in _ACTIVE_POLICIES:
+        condition = rule.get("condition")
+        if condition and _condition_fires(condition, features_set, raw_lower):
+            violations.append({
+                "rule_name": rule["name"],
+                "severity": rule.get("severity", "RED"),
+                "regulation": rule.get("regulation", ""),
+                "reason": rule.get("reason", ""),
+            })
 
     passed: bool = len(violations) == 0
     return {
