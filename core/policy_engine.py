@@ -137,6 +137,29 @@ def reset_to_default_policies() -> None:
     set_active_policies(_default_enforced_rules())
 
 
+def validate_rule_content(content: dict) -> tuple[bool, str]:
+    """Validate an uploaded rule's content_json. Returns (ok, error_message)."""
+    if not isinstance(content, dict):
+        return False, "content_json must be an object"
+    if content.get("severity") not in ("RED", "YELLOW"):
+        return False, "severity must be 'RED' or 'YELLOW'"
+    cond = content.get("condition")
+    if not isinstance(cond, dict):
+        return False, "condition must be an object"
+    ctype = cond.get("type")
+    if ctype == "feature_present":
+        if not isinstance(cond.get("features"), list) or not cond["features"]:
+            return False, "feature_present requires a non-empty 'features' list"
+        if cond.get("match", "any") not in ("any", "all"):
+            return False, "condition.match must be 'any' or 'all'"
+    elif ctype == "pattern_match":
+        if not isinstance(cond.get("patterns"), list) or not cond["patterns"]:
+            return False, "pattern_match requires a non-empty 'patterns' list"
+    else:
+        return False, "condition.type must be 'feature_present' or 'pattern_match'"
+    return True, ""
+
+
 def _condition_fires(condition: dict, features_set: set[str], raw_lower: str) -> bool:
     """Generic evaluator for a single rule condition."""
     ctype = condition.get("type")

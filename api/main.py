@@ -53,6 +53,7 @@ from core.risk_router import check_drift, load_model_meta
 from core.drift import compute_drift_status
 from core import retrain as retrain_service
 from core import drift_alert
+from core import policy_store, policy_engine
 from core.sync_pipeline import sync_governance_pipeline
 from core.artifact_engine import export_for_regulator
 from core.resume_parser import extract_text_from_pdf, parse_resume
@@ -615,6 +616,79 @@ async def admin_retrain(background: BackgroundTasks):
 @app.get("/admin/retrain/status", summary="F5.2: poll the retrain job state")
 async def admin_retrain_status():
     return retrain_service.get_status()
+
+
+# ---------------------------------------------------------------------------
+# F2: Policy Database admin endpoints (contracts/admin-policies.md)
+# Ungated for now — the `admin` role arrives with F1/F8.
+# ---------------------------------------------------------------------------
+
+class PolicyCreate(BaseModel):
+    name: str = Field(..., json_schema_extra={"example": "NO_AGE_IN_HIRING"})
+    content_json: dict = Field(..., json_schema_extra={"example": {
+        "severity": "RED",
+        "regulation": "Example regulation",
+        "reason": "Age is a protected attribute",
+        "condition": {"type": "feature_present", "features": ["applicant_age"], "match": "any"},
+    }})
+    uploaded_by: str = Field("admin")
+
+
+class PolicyToggle(BaseModel):
+    is_active: bool
+    changed_by: str = Field("admin")
+
+
+def _policy_view(row: dict) -> dict:
+    content = row.get("content_json") or {}
+    return {
+        "id": row.get("id"),
+        "name": row.get("name"),
+        "severity": content.get("severity"),
+        "is_active": row.get("is_active"),
+        "source": row.get("source"),
+        "created_at": row.get("created_at"),
+        "uploaded_by": row.get("uploaded_by"),
+    }
+
+
+@app.post("/admin/policies", status_code=201, summary="F2: create a policy rule (lands INACTIVE)")
+async def create_policy(body: PolicyCreate):
+    ok, err = policy_engine.validate_rule_content(body.content_json)
+    if not ok:
+        raise HTTPException(status_code=400, detail=f"Invalid rule: {err}")
+    try:
+        created = policy_store.insert_policy(
+            body.name, body.content_json, body.uploaded_by, source="json", is_active=False
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Policy DB unavailable: {exc}")
+    return {
+        "created": [_policy_view(created)],
+        "message": "1 rule created (inactive). Review and activate.",
+    }
+
+
+@app.get("/admin/policies", summary="F2: list all policy rules")
+async def list_policies():
+    try:
+        rows = policy_store.list_policies()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Policy DB unavailable: {exc}")
+    return {"count": len(rows), "policies": [_policy_view(r) for r in rows]}
+
+
+@app.patch("/admin/policies/{policy_id}", summary="F2: activate/deactivate a policy (hot-reload)")
+async def toggle_policy(policy_id: str, body: PolicyToggle):
+    try:
+        updated = policy_store.set_policy_active(policy_id, body.is_active, body.changed_by)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Policy DB unavailable: {exc}")
+    if updated is None:
+        raise HTTPException(status_code=404, detail=f"Policy '{policy_id}' not found.")
+    # Hot-reload the engine cache so the change takes effect immediately.
+    policy_store.refresh_active_policies()
+    return _policy_view(updated)
 
 
 # ---------------------------------------------------------------------------
