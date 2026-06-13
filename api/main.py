@@ -52,6 +52,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from core.risk_router import check_drift, load_model_meta
 from core.drift import compute_drift_status
 from core import retrain as retrain_service
+from core import drift_alert
 from core.sync_pipeline import sync_governance_pipeline
 from core.artifact_engine import export_for_regulator
 from core.resume_parser import extract_text_from_pdf, parse_resume
@@ -242,7 +243,7 @@ def _attach_rejection_email(
 # ---------------------------------------------------------------------------
 
 @app.post("/decision", summary="Run the full AgentGuard governance pipeline")
-async def run_decision(candidate_input: CandidateInput):
+async def run_decision(candidate_input: CandidateInput, background: BackgroundTasks):
     """
     Execute the complete pipeline for one candidate:
 
@@ -266,6 +267,10 @@ async def run_decision(candidate_input: CandidateInput):
         payload["classification"],
         payload["total_latency_ms"],
     )
+
+    # F5: re-evaluate drift after each decision; fires the alert hook (M3 email)
+    # once on a False->True transition. Background = never blocks the response.
+    background.add_task(drift_alert.run_drift_check)
 
     return {
         "decision_id": payload["decision_id"],
