@@ -27,6 +27,7 @@ from core.resume_parser import (
     parse_resume_structured,
     resolve_candidate_email,
 )
+from core.bert_resume_parser import parse_resume_fast, should_use_llm_fallback
 from core.job_match_scores import composite_match_scores
 from core.artifact_engine import generate_artifact, save_artifact
 from core.policy_engine import evaluate_pool_quota_rule
@@ -205,13 +206,18 @@ async def process_single_resume_candidate(
             raise ValueError("empty extraction")
 
         async with semaphore:
-            structured = cast(
-                dict[str, Any],
-                await asyncio.wait_for(
-                    _run_in_thread(parse_resume_structured, extracted_text, job_description),
-                    timeout=180.0,
-                ),
-            )
+            bert_result = await _run_in_thread(parse_resume_fast, extracted_text, job_description)
+            if should_use_llm_fallback(bert_result):
+                structured = cast(
+                    dict[str, Any],
+                    await asyncio.wait_for(
+                        _run_in_thread(parse_resume_structured, extracted_text, job_description),
+                        timeout=180.0,
+                    ),
+                )
+                structured["_parse_method"] = "llm_fallback"
+            else:
+                structured = bert_result
     except Exception as exc:
         logger.warning("ingest_failed file=%s err=%s", rel_path, exc)
         stem = Path(rel_path).stem

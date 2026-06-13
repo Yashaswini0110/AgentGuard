@@ -14,7 +14,10 @@ GET    /health                    Liveness probe.
 GET    /decisions                 List all saved artifact filenames.
 GET    /decisions/{decision_id}   Fetch a single artifact by ID.
 GET    /drift                     Drift report from the last 100 artifacts.
+GET    /analytics/policy-violations  Aggregate policy violations across artifacts.
 POST   /human-review/{decision_id} Record a human APPROVE / REJECT action.
+POST   /artifacts/{decision_id}/hold   Place an artifact on hold.
+DELETE /artifacts/{decision_id}/hold   Release an artifact hold.
 GET    /artifacts/recent           Recent saved artifacts (full JSON).
 POST   /escalate/{decision_id}     HR escalation to tech review.
 POST   /tech-review/{decision_id} Tech reviewer ACCEPT / REJECT.
@@ -155,6 +158,11 @@ class HumanReviewInput(BaseModel):
     action: str = Field(..., pattern="^(APPROVE|REJECT)$", json_schema_extra={"example": "APPROVE"})
     reviewer_id: str = Field(..., json_schema_extra={"example": "HR-OFFICER-42"})
     reason: str = Field(..., json_schema_extra={"example": "Reviewed all evidence; decision is fair."})
+
+
+class HoldRequest(BaseModel):
+    reason: str = Field(..., json_schema_extra={"example": "Pending legal review before execution."})
+    held_by: str = Field(..., json_schema_extra={"example": "HR-COMPLIANCE-01"})
 
 
 class EscalateInput(BaseModel):
@@ -542,6 +550,88 @@ async def drift_report():
     return drift
 
 
+@app.get("/analytics/policy-violations", summary="Aggregate policy violations across artifacts")
+async def policy_violations_analytics(days: Optional[int] = None):
+    """
+    Scan all artifact JSON files in ``artifacts/``, aggregate ``policy_violations``
+    by rule, severity, and regulation. Optional ``days`` query param limits to
+    artifacts whose ``timestamp`` falls within the trailing N-day window.
+    """
+    cutoff: datetime.datetime | None = None
+    if days is not None:
+        if days < 1:
+            raise HTTPException(status_code=400, detail="days must be a positive integer.")
+        cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)
+
+    by_rule: dict[str, int] = {}
+    by_severity: dict[str, int] = {}
+    by_regulation: dict[str, int] = {}
+    total_violations = 0
+    artifacts_scanned = 0
+    artifacts_with_violations = 0
+
+    json_files = sorted(
+        ARTIFACTS_DIR.glob("*.json"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    for path in json_files:
+        try:
+            with open(path, encoding="utf-8") as fh:
+                artifact: dict = json.load(fh)
+        except Exception:
+            continue
+
+        if cutoff is not None:
+            ts = artifact.get("timestamp")
+            if not ts:
+                continue
+            try:
+                dt = datetime.datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=datetime.timezone.utc)
+                if dt < cutoff:
+                    continue
+            except (TypeError, ValueError):
+                continue
+
+        artifacts_scanned += 1
+        violations = artifact.get("policy_violations") or []
+        if not isinstance(violations, list):
+            violations = []
+
+        if violations:
+            artifacts_with_violations += 1
+
+        for violation in violations:
+            if not isinstance(violation, dict):
+                continue
+            total_violations += 1
+            rule_name = str(violation.get("rule_name") or "UNKNOWN")
+            severity = str(violation.get("severity") or "UNKNOWN")
+            regulation = str(violation.get("regulation") or "UNKNOWN")
+            by_rule[rule_name] = by_rule.get(rule_name, 0) + 1
+            by_severity[severity] = by_severity.get(severity, 0) + 1
+            by_regulation[regulation] = by_regulation.get(regulation, 0) + 1
+
+    top_5_rules = sorted(
+        [{"rule_name": name, "count": count} for name, count in by_rule.items()],
+        key=lambda row: row["count"],
+        reverse=True,
+    )[:5]
+
+    return {
+        "total_violations": total_violations,
+        "by_rule": by_rule,
+        "by_severity": by_severity,
+        "by_regulation": by_regulation,
+        "top_5_rules": top_5_rules,
+        "artifacts_scanned": artifacts_scanned,
+        "artifacts_with_violations": artifacts_with_violations,
+        **({"days_filter": days} if days is not None else {}),
+    }
+
+
 @app.get("/drift/status", summary="F5 drift signal: rolling RED rate vs training baseline")
 async def drift_status():
     """
@@ -790,6 +880,44 @@ async def tech_review(decision_id: str, body: TechReviewInput):
     if rejection_email is not None:
         payload["rejection_email"] = rejection_email
     return payload
+
+
+@app.post("/artifacts/{decision_id}/hold", summary="Place an artifact on hold")
+async def hold_artifact(decision_id: str, body: HoldRequest):
+    """
+    Mark an existing artifact as ON_HOLD with reason, reviewer, and timestamp.
+
+    Recomputes ``artifact_hash`` and persists to filesystem + Supabase (best-effort).
+    """
+    artifact = _load_artifact(decision_id)
+
+    artifact["hold_status"] = "ON_HOLD"
+    artifact["hold_reason"] = body.reason
+    artifact["held_by"] = body.held_by
+    artifact["hold_timestamp"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+    _write_artifact_file(artifact)
+    logger.info(
+        "Artifact hold recorded | decision_id=%s | held_by=%s",
+        decision_id,
+        body.held_by,
+    )
+    return {"message": "Artifact placed on hold.", "artifact": artifact}
+
+
+@app.delete("/artifacts/{decision_id}/hold", summary="Release an artifact hold")
+async def release_artifact_hold(decision_id: str):
+    """
+    Remove hold fields from an artifact, recompute ``artifact_hash``, and persist.
+    """
+    artifact = _load_artifact(decision_id)
+
+    for key in ("hold_status", "hold_reason", "held_by", "hold_timestamp"):
+        artifact.pop(key, None)
+
+    _write_artifact_file(artifact)
+    logger.info("Artifact hold released | decision_id=%s", decision_id)
+    return {"message": "Artifact hold released.", "artifact": artifact}
 
 
 @app.post("/shortlist/email", summary="Send shortlist notification emails to accepted candidates")

@@ -18,3 +18,5 @@ python-docx==1.2.0
 supabase==2.9.1
 websockets==15.0.1
 plotly==5.24.1
+transformers>=4.44.0
+torch>=2.0.0

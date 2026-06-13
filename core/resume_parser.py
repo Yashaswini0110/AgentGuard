@@ -359,39 +359,86 @@ def humanize_resume_filename_stem(stem: str) -> str:
 
 _EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 _PLACEHOLDER_EMAIL_DOMAINS = frozenset({"example.com", "example.org", "test.com", "email.com"})
+_GENERIC_LOCAL_PARTS = frozenset({
+    "info", "contact", "hr", "careers", "jobs", "recruitment", "noreply", "no-reply",
+    "support", "admin", "hello", "office", "enquiry", "inquiry",
+})
+
+
+def _normalize_email_spacing(text: str) -> str:
+    """Collapse PDF/OCR spacing artifacts around @ and dots in email-like spans."""
+    if not text:
+        return ""
+    t = text
+    t = re.sub(r"(?<=[A-Za-z0-9._%+-])\s+@", "@", t)
+    t = re.sub(r"@\s+(?=[A-Za-z0-9])", "@", t)
+    t = re.sub(r"(?<=[A-Za-z0-9])\s+\.(?=[A-Za-z0-9])", ".", t)
+    return t
 
 
 def _normalize_email(value: str | None) -> str | None:
     if not value or not isinstance(value, str):
         return None
-    email = value.strip().lower()
-    if not _EMAIL_RE.fullmatch(email):
+    cleaned = value.strip().lower()
+    cleaned = cleaned.replace("##", "").replace(" ", "")
+    cleaned = cleaned.strip(".,;:\"'()[]<>")
+    if not _EMAIL_RE.fullmatch(cleaned):
         return None
-    domain = email.rsplit("@", 1)[-1]
+    domain = cleaned.rsplit("@", 1)[-1]
     if domain in _PLACEHOLDER_EMAIL_DOMAINS:
         return None
-    return email
+    return cleaned
+
+
+def _pick_best_email(candidates: list[str]) -> str | None:
+    """Prefer personal addresses over generic mailbox prefixes (info@, hr@, …)."""
+    if not candidates:
+        return None
+    personal = [
+        e for e in candidates
+        if e.split("@", 1)[0] not in _GENERIC_LOCAL_PARTS
+    ]
+    return personal[0] if personal else candidates[0]
+
+
+def _collect_emails_from_blob(blob: str) -> list[str]:
+    found: list[str] = []
+    for variant in (blob, _normalize_email_spacing(blob)):
+        for match in _EMAIL_RE.finditer(variant):
+            normalized = _normalize_email(match.group(0))
+            if normalized and normalized not in found:
+                found.append(normalized)
+    return found
 
 
 def extract_email_from_text(text: str) -> str | None:
-    """Regex fallback when the LLM omits email from structured output."""
+    """Regex extraction with PDF spacing repair; scans header first."""
     if not text:
         return None
-    for match in _EMAIL_RE.finditer(text):
-        normalized = _normalize_email(match.group(0))
-        if normalized:
-            return normalized
-    return None
+    candidates: list[str] = []
+    for section in (text[:3000], text):
+        for email in _collect_emails_from_blob(section):
+            if email not in candidates:
+                candidates.append(email)
+    return _pick_best_email(candidates)
 
 
 def resolve_candidate_email(structured: dict | None, resume_text: str = "") -> str | None:
-    """Prefer LLM-extracted email; fall back to regex over raw résumé text."""
+    """Extract email from résumé text (primary) and validate against structured output."""
     structured = structured or {}
-    from_llm = _normalize_email(structured.get("email"))
-    if from_llm:
-        return from_llm
     blob = resume_text or structured.get("resume_text") or ""
-    return extract_email_from_text(str(blob))
+    from_text = extract_email_from_text(str(blob))
+    from_structured = _normalize_email(structured.get("email"))
+
+    if from_text and from_structured:
+        if from_structured == from_text:
+            return from_structured
+        collapsed = _normalize_email_spacing(str(blob)).lower().replace(" ", "")
+        if from_structured in collapsed:
+            return from_structured
+        return from_text
+
+    return from_text or from_structured
 
 
 def _strip_code_fence(raw: str) -> str:
