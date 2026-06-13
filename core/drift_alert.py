@@ -14,7 +14,6 @@ the governance pipeline.
 from __future__ import annotations
 
 import datetime
-import glob
 import json
 import logging
 import os
@@ -26,7 +25,6 @@ from core import drift, risk_router
 logger = logging.getLogger("agentguard.drift")
 
 _ROOT = os.path.dirname(os.path.dirname(__file__))
-ARTIFACTS_DIR = os.path.join(_ROOT, "artifacts")
 STATE_PATH = os.path.join(_ROOT, "models", "drift_state.json")
 
 _LOCK = threading.Lock()
@@ -100,23 +98,8 @@ def evaluate_and_notify(
     return status
 
 
-def _load_artifacts() -> list[dict]:
-    arts: list[dict] = []
-    files = sorted(
-        glob.glob(os.path.join(ARTIFACTS_DIR, "*.json")),
-        key=os.path.getmtime,
-        reverse=True,
-    )[:2000]
-    for fp in files:
-        try:
-            with open(fp, encoding="utf-8") as f:
-                arts.append(json.load(f))
-        except Exception:
-            pass
-    return arts
-
-
 def run_drift_check() -> dict:
     """Background entrypoint: load artifacts + baseline, evaluate, notify."""
+    from core import artifact_store
     baseline = float(risk_router.load_model_meta().get("baseline_red_rate", 0.15))
-    return evaluate_and_notify(_load_artifacts(), baseline)
+    return evaluate_and_notify(artifact_store.load_all(2000), baseline)

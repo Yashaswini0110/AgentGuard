@@ -16,8 +16,6 @@ Contract: contracts/admin-retrain.md
 from __future__ import annotations
 
 import datetime
-import glob
-import json
 import os
 import threading
 import uuid
@@ -27,7 +25,6 @@ import pandas as pd
 from core import risk_router
 
 _ROOT = os.path.dirname(os.path.dirname(__file__))
-ARTIFACTS_DIR = os.path.join(_ROOT, "artifacts")
 SYNTHETIC_CSV = os.path.join(_ROOT, "data", "synthetic_hr_dataset.csv")
 
 _LOCK = threading.Lock()
@@ -65,13 +62,9 @@ def _update(**fields) -> None:
 
 def _artifact_training_rows() -> list[dict]:
     """Rows from real decisions that persisted their router_features + label."""
+    from core import artifact_store
     rows: list[dict] = []
-    for fp in glob.glob(os.path.join(ARTIFACTS_DIR, "*.json")):
-        try:
-            with open(fp, encoding="utf-8") as fh:
-                art = json.load(fh)
-        except Exception:
-            continue
+    for art in artifact_store.load_all():
         feats = art.get("router_features")
         label = art.get("routing_classification")
         if (

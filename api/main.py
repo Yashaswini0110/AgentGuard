@@ -54,6 +54,7 @@ from core.drift import compute_drift_status
 from core import retrain as retrain_service
 from core import drift_alert
 from core import policy_store, policy_engine
+from core import artifact_store
 from core.policy_extract import extract_rules_from_text
 from core.sync_pipeline import sync_governance_pipeline
 from core.artifact_engine import export_for_regulator
@@ -210,17 +211,16 @@ def _artifact_path(decision_id: str) -> Path:
 
 
 def _load_artifact(decision_id: str) -> dict:
-    path = _artifact_path(decision_id)
-    if not path.exists():
+    # F9: Supabase-first with filesystem fallback.
+    artifact = artifact_store.load(decision_id)
+    if artifact is None:
         raise HTTPException(status_code=404, detail=f"Artifact '{decision_id}' not found.")
-    with open(path, encoding="utf-8") as fh:
-        return json.load(fh)
+    return artifact
 
 
 def _write_artifact_file(artifact: dict) -> None:
-    path = _artifact_path(artifact["decision_id"])
-    with open(path, "w", encoding="utf-8") as fh:
-        json.dump(artifact, fh, indent=2, sort_keys=True)
+    # F9: dual-write (Supabase + filesystem) via the artifact store.
+    artifact_store.save(artifact)
 
 
 def _clear_bulk_review_pending(artifact: dict) -> None:
@@ -404,9 +404,8 @@ async def list_decisions():
     Returns a list of all artifact filenames (stem = decision_id) stored in
     the artifacts/ directory.
     """
-    ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
-    filenames = sorted(p.name for p in ARTIFACTS_DIR.glob("*.json"))
-    return {"count": len(filenames), "artifacts": filenames}
+    ids = sorted(f"{a.get('decision_id')}.json" for a in artifact_store.load_all())
+    return {"count": len(ids), "artifacts": ids}
 
 
 # ---------------------------------------------------------------------------
@@ -517,20 +516,8 @@ async def artifacts_recent(limit: int = 50):
     Returns full artifact documents for the most recently modified JSON files,
     newest first (bounded by ``limit``, max 500).
     """
-    ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
     cap = max(1, min(limit, 500))
-    files = sorted(
-        ARTIFACTS_DIR.glob("*.json"),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )[:cap]
-    artifacts: list[dict] = []
-    for fp in files:
-        try:
-            with open(fp, encoding="utf-8") as fh:
-                artifacts.append(json.load(fh))
-        except Exception:
-            pass
+    artifacts = artifact_store.list_recent(cap)
     return {"count": len(artifacts), "artifacts": artifacts}
 
 
@@ -545,23 +532,11 @@ async def drift_report():
     extracts their routing_classification values, and calls check_drift()
     to produce a distribution / anomaly report.
     """
-    ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
-
-    # Take the 100 most recently written files (sorted descending by name so
-    # UUIDs with later timestamps appear first — good-enough approximation).
-    artifact_files = sorted(ARTIFACTS_DIR.glob("*.json"), reverse=True)[:100]
-
-    risk_levels: list[str] = []
-    for fp in artifact_files:
-        try:
-            with open(fp, encoding="utf-8") as fh:
-                art = json.load(fh)
-            level = art.get("routing_classification")
-            if level:
-                risk_levels.append(level)
-        except Exception:
-            pass  # skip corrupt files
-
+    risk_levels: list[str] = [
+        a.get("routing_classification")
+        for a in artifact_store.load_all(100)
+        if a.get("routing_classification")
+    ]
     drift = check_drift(risk_levels)
     drift["artifacts_analysed"] = len(risk_levels)
     return drift
@@ -574,26 +549,10 @@ async def drift_status():
     (models/model_meta.json). Drift is flagged when the daily RED rate exceeds
     baseline x 1.5 for 3 consecutive days. Contract: contracts/drift-status.md.
 
-    Reads artifacts from the filesystem today; this is the only part that changes
-    when F9 moves artifacts into Supabase.
+    Artifacts come from the artifact store (Supabase ∪ filesystem); compute_drift_status
+    filters to the trailing window by each artifact's own timestamp field.
     """
-    ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
-
-    # Load recent artifacts (newest by mtime). compute_drift_status filters to the
-    # trailing window by each artifact's own timestamp field.
-    files = sorted(
-        ARTIFACTS_DIR.glob("*.json"),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )[:2000]
-    artifacts: list[dict] = []
-    for fp in files:
-        try:
-            with open(fp, encoding="utf-8") as fh:
-                artifacts.append(json.load(fh))
-        except Exception:
-            pass  # skip corrupt files
-
+    artifacts = artifact_store.load_all(2000)
     baseline = float(load_model_meta().get("baseline_red_rate", 0.15))
     return compute_drift_status(artifacts, baseline)
 

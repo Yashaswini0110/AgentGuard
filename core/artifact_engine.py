@@ -109,26 +109,11 @@ def generate_artifact(
 
 def save_artifact(artifact: dict) -> str:
     """
-    Persist the artifact to artifacts/<decision_id>.json.
-
-    Parameters
-    ----------
-    artifact : The complete artifact dict (with artifact_hash).
-
-    Returns
-    -------
-    str — Absolute path to the saved file.
+    Persist the artifact via the artifact store (F9): dual-write to Supabase +
+    the local artifacts/<decision_id>.json file. Returns the file path.
     """
-    artifacts_dir = Path("artifacts")
-    artifacts_dir.mkdir(parents=True, exist_ok=True)
-
-    decision_id: str = artifact["decision_id"]
-    file_path: Path  = artifacts_dir / f"{decision_id}.json"
-
-    with open(file_path, "w", encoding="utf-8") as fh:
-        json.dump(artifact, fh, indent=2, sort_keys=True)
-
-    return str(file_path.resolve())
+    from core import artifact_store
+    return artifact_store.save(artifact)
 
 
 # ---------------------------------------------------------------------------

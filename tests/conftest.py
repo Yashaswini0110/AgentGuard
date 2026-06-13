@@ -10,6 +10,10 @@ import os
 import sys
 import pytest
 
+# Tests must not write to the shared Supabase artifact store (F9). Force the
+# artifact store to filesystem-only unless a run explicitly opts in.
+os.environ.setdefault("AGENTGUARD_ARTIFACT_DB", "0")
+
 # ── Make sure the repo root is on sys.path so both `core` and `tests` resolve ─
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if REPO_ROOT not in sys.path:
