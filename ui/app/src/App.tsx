@@ -7,6 +7,7 @@ import TechReviewPage from './pages/TechReviewPage'
 import ShortlistPage from './pages/ShortlistPage'
 import RunDecisionPage from './pages/RunDecisionPage'
 import BulkRankPage from './pages/BulkRankPage'
+import AdminPage from './pages/AdminPage'
 import ProtectedRoute from './components/ProtectedRoute'
 
 export default function App() {
@@ -59,6 +60,14 @@ export default function App() {
         element={
           <ProtectedRoute roles={['hr']}>
             <ShortlistPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin"
+        element={
+          <ProtectedRoute roles={['admin']}>
+            <AdminPage />
           </ProtectedRoute>
         }
       />

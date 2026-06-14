@@ -14,7 +14,7 @@ export function joinUrl(base: string, path: string) {
 }
 
 export function apiBase() {
-  const env = (import.meta as any).env as Record<string, string | undefined>
+  const env = (import.meta as { env?: Record<string, string | undefined> }).env
   // Prefer explicit env var, otherwise use the dev/preview proxy in vite.config.ts.
   // FastAPI mounts routes at /. If someone copies `…/api` from another stack, normalize it away.
   const raw = (env?.VITE_API_BASE_URL || '').trim()
@@ -68,9 +68,71 @@ export async function fetchDrift() {
   return await httpJson<DriftReport>('/drift')
 }
 
+export interface DriftStatus {
+  is_drifting: boolean
+  current_red_rate: number
+  baseline_red_rate: number
+  threshold: number
+  days_exceeded: number
+  days_required: number
+  window_days: number
+  total_decisions: number
+  daily: Array<{ date: string; red_rate: number; total: number }>
+}
+
+export async function fetchDriftStatus() {
+  return await httpJson<DriftStatus>('/drift/status')
+}
+
+export interface PolicyRule {
+  id: string
+  name: string
+  severity: string | null
+  is_active: boolean
+  source: string | null
+  created_at: string | null
+  uploaded_by: string | null
+}
+
+export async function fetchPolicies(): Promise<PolicyRule[]> {
+  const data = await httpJson<{ policies: PolicyRule[] }>('/admin/policies')
+  return data.policies ?? []
+}
+
+export async function patchPolicy(
+  id: string,
+  is_active: boolean,
+  changed_by: string
+): Promise<PolicyRule> {
+  return await httpJson<PolicyRule>(`/admin/policies/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ is_active, changed_by }),
+  })
+}
+
+export interface RetrainJobStatus {
+  job_id: string | null
+  status: 'IDLE' | 'RUNNING' | 'DONE' | 'FAILED'
+  started_at: string | null
+  finished_at: string | null
+  old_accuracy: number | null
+  new_accuracy: number | null
+  swapped: boolean
+  model_version_hash: string | null
+  message: string | null
+}
+
+export async function postRetrain(): Promise<{ job_id: string; status: string }> {
+  return await httpJson('/admin/retrain', { method: 'POST' })
+}
+
+export async function fetchRetrainStatus(): Promise<RetrainJobStatus> {
+  return await httpJson<RetrainJobStatus>('/admin/retrain/status')
+}
+
 export async function fetchRecentArtifacts(limit = 200) {
-  const data = await httpJson<{ artifacts?: any[] }>('/artifacts/recent?limit=' + encodeURIComponent(String(limit)))
-  return (data.artifacts ?? []) as any[]
+  const data = await httpJson<{ artifacts?: unknown[] }>('/artifacts/recent?limit=' + encodeURIComponent(String(limit)))
+  return (data.artifacts ?? []) as unknown[]
 }
 
 export async function postDecision(payload: CandidatePayload) {

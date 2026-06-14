@@ -1,6 +1,6 @@
 /** Demo-only auth — not for production. */
 
-export type DemoRole = 'hr' | 'tech'
+export type DemoRole = 'hr' | 'tech' | 'admin'
 
 export interface DemoSessionUser {
   id: string
@@ -12,9 +12,10 @@ const STORAGE_KEY = 'agentguard_demo_session_v1'
 
 export const DEMO_LOGIN_PASSWORD = 'demo'
 
-/** One HR plus three tech reviewers; IDs are persisted on artifacts as reviewer_id */
+/** One HR, one admin, three tech reviewers; IDs are persisted on artifacts as reviewer_id */
 export const DEMO_USERS: DemoSessionUser[] = [
   { id: 'HR-COMPLIANCE-01', label: 'Jordan Chen (HR Compliance)', role: 'hr' },
+  { id: 'ADMIN-01', label: 'Admin (Governance Ops)', role: 'admin' },
   { id: 'TECH-REVIEWER-01', label: 'Alex Kumar (Technical)', role: 'tech' },
   { id: 'TECH-REVIEWER-02', label: 'Sam Rivera (Technical)', role: 'tech' },
   { id: 'TECH-REVIEWER-03', label: 'Riley Patel (Technical)', role: 'tech' },
@@ -33,7 +34,7 @@ export function readDemoSession(): DemoSessionUser | null {
       parsed &&
       typeof parsed.id === 'string' &&
       typeof parsed.label === 'string' &&
-      (parsed.role === 'hr' || parsed.role === 'tech')
+      (parsed.role === 'hr' || parsed.role === 'tech' || parsed.role === 'admin')
     ) {
       const canon = findDemoUser(parsed.id)
       if (canon && canon.role === parsed.role) return canon

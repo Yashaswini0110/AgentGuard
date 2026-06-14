@@ -13,11 +13,14 @@ const NAV_HR: { to: string; label: string }[] = [
 
 const NAV_TECH: { to: string; label: string }[] = [{ to: '/tech-review', label: 'Tech Review' }]
 
+const NAV_ADMIN: { to: string; label: string }[] = [{ to: '/admin', label: 'Admin' }]
+
 function initials(label: string, role: DemoRole) {
   const parts = label.trim().split(/\s+/)
   if (parts.length >= 2) {
     return (parts[0][0] + parts[1][0]).toUpperCase()
   }
+  if (role === 'admin') return 'AD'
   return role === 'hr' ? 'HR' : 'T'
 }
 
@@ -27,7 +30,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const { user, logout } = useDemoAuth()
   const isActive = (path: string) => location.pathname === path
 
-  const navLinks = user?.role === 'tech' ? NAV_TECH : NAV_HR
+  const navLinks = user?.role === 'tech' ? NAV_TECH : user?.role === 'admin' ? NAV_ADMIN : NAV_HR
 
   const handleLogout = () => {
     logout()
@@ -93,10 +96,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 style={{
                   width: '28px',
                   height: '28px',
-                  backgroundColor: user.role === 'hr' ? '#EFF6FF' : '#F5F3FF',
-                  color: user.role === 'hr' ? '#0D6EFD' : '#5B21B6',
+                  backgroundColor: user.role === 'hr' ? '#EFF6FF' : user.role === 'admin' ? '#FEF3C7' : '#F5F3FF',
+                  color: user.role === 'hr' ? '#0D6EFD' : user.role === 'admin' ? '#92400E' : '#5B21B6',
                 }}
-                title={user.role === 'hr' ? 'HR' : 'Technical reviewer'}
+                title={user.role === 'hr' ? 'HR' : user.role === 'admin' ? 'Admin' : 'Technical reviewer'}
               >
                 {initials(user.label, user.role)}
               </div>

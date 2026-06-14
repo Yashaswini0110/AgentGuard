@@ -18,6 +18,7 @@ export default function LoginPage() {
 
   const hrUsers = DEMO_USERS.filter((u) => u.role === 'hr')
   const techUsers = DEMO_USERS.filter((u) => u.role === 'tech')
+  const adminUsers = DEMO_USERS.filter((u) => u.role === 'admin')
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -33,6 +34,7 @@ export default function LoginPage() {
   const grouped = [
     { title: 'HR', list: hrUsers },
     { title: 'Technical reviewers', list: techUsers },
+    { title: 'Admin', list: adminUsers },
   ]
 
   return (
@@ -64,7 +66,7 @@ export default function LoginPage() {
           </h1>
           <p className="font-sans text-sm mt-2" style={{ color: '#6B6B6B' }}>
             Choose a demo account and enter the shared password <span className="font-mono">{DEMO_LOGIN_PASSWORD}</span>.
-            HR lands on Review Queue; technical reviewers land on Tech Review.
+            HR lands on Review Queue; tech reviewers land on Tech Review; Admin lands on the Admin panel.
           </p>
 
           <form onSubmit={(e) => void handleSubmit(e)} className="mt-8 space-y-5">

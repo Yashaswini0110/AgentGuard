@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { ArrowRight } from 'lucide-react'
 import AppShell from '@/components/AppShell'
 import { StatusDot } from '@/components/StatusDot'
-import { apiBase, fetchDrift, fetchHealth, fetchRecentArtifacts } from '@/lib/api'
+import { apiBase, fetchDrift, fetchDriftStatus, fetchHealth, fetchRecentArtifacts } from '@/lib/api'
+import type { DriftStatus } from '@/lib/api'
 import {
   dashboardRowStatus,
   formatArtifactTime,
@@ -33,8 +34,19 @@ export default function DashboardPage() {
     total: number
     alert?: boolean
   } | null>(null)
+  const [driftStatus, setDriftStatus] = useState<DriftStatus | null>(null)
   const [artifacts, setArtifacts] = useState<AgentGuardArtifact[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const refreshDriftStatus = useCallback(async () => {
+    try {
+      const ds = await fetchDriftStatus()
+      setDriftStatus(ds)
+    } catch {
+      // non-fatal — banner stays hidden if endpoint unreachable
+    }
+  }, [])
 
   const refresh = useCallback(async () => {
     setLoadError(null)
@@ -65,8 +77,16 @@ export default function DashboardPage() {
   }, [])
 
   useEffect(() => {
-    void refresh()
-  }, [refresh])
+    const init = async () => {
+      await refresh()
+      await refreshDriftStatus()
+    }
+    void init()
+    pollRef.current = setInterval(() => void refreshDriftStatus(), 30_000)
+    return () => {
+      if (pollRef.current !== null) clearInterval(pollRef.current)
+    }
+  }, [refresh, refreshDriftStatus])
 
   const recentSlice = artifacts.slice(0, 12)
   const policyPassPct =
@@ -129,14 +149,42 @@ export default function DashboardPage() {
         </Link>
       </div>
 
+      {/* Drift alert banner — only visible when is_drifting */}
+      {driftStatus?.is_drifting && (
+        <div
+          className="flex items-start gap-3 px-4 py-3 rounded-lg mb-5 font-sans text-sm"
+          style={{
+            backgroundColor: '#FEF3C7',
+            border: '1px solid #FCD34D',
+            color: '#92400E',
+          }}
+        >
+          <span style={{ fontSize: '16px', lineHeight: '1.4' }}>⚠</span>
+          <div>
+            <span className="font-semibold">Drift alert — RED rate elevated</span>
+            <span style={{ marginLeft: '8px' }}>
+              {(driftStatus.current_red_rate * 100).toFixed(1)}% current vs {(driftStatus.baseline_red_rate * 100).toFixed(1)}% baseline
+              {' · '}
+              {driftStatus.days_exceeded} of {driftStatus.days_required} consecutive days exceeded threshold
+              {' · '}
+              {driftStatus.total_decisions} decisions in {driftStatus.window_days}-day window
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Stat row */}
       <div className="flex" style={{ borderBottom: '1px solid #E4E2DC', paddingBottom: '28px' }}>
         {[
           {
-            value: String(drift?.total ?? artifacts.length),
+            value: String(driftStatus?.total_decisions ?? drift?.total ?? artifacts.length),
             label: 'Decisions in window',
-            delta: drift?.alert ? 'Drift alert: RED >20%' : 'From /drift + recent artifacts',
-            deltaColor: drift?.alert ? '#B91C1C' : '#6B6B6B',
+            delta: driftStatus?.is_drifting
+              ? `Drift alert — ${driftStatus.days_exceeded}/${driftStatus.days_required} days RED > threshold`
+              : drift?.alert
+                ? 'Drift alert: RED >20%'
+                : 'From /drift/status · 7-day window',
+            deltaColor: (driftStatus?.is_drifting || drift?.alert) ? '#B91C1C' : '#6B6B6B',
           },
           {
             value: String(blockedCount),
@@ -191,7 +239,13 @@ export default function DashboardPage() {
           Decision Pipeline
         </h2>
         <p className="font-sans text-xs mt-1" style={{ color: '#9B9B9B' }}>
-          Routing mix from GET /drift (last artefacts on disk){drift?.alert ? ' · ⚠ Elevated RED share' : ''}
+          Routing mix from GET /drift (last artefacts on disk)
+          {(driftStatus?.is_drifting || drift?.alert) ? ' · ⚠ Elevated RED share' : ''}
+          {driftStatus && (
+            <span style={{ marginLeft: '8px', color: driftStatus.is_drifting ? '#B91C1C' : '#15803D' }}>
+              · 7d RED rate: {(driftStatus.current_red_rate * 100).toFixed(1)}% (baseline {(driftStatus.baseline_red_rate * 100).toFixed(1)}%)
+            </span>
+          )}
         </p>
 
         <div className="flex items-center gap-4 mt-5">

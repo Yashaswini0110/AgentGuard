@@ -4,6 +4,7 @@ import type { DemoRole } from '@/lib/demoAuth'
 import { useDemoAuth } from '@/contexts/DemoAuthContext'
 
 export function defaultRouteForRole(role: DemoRole): string {
+  if (role === 'admin') return '/admin'
   return role === 'hr' ? '/review' : '/tech-review'
 }
 
