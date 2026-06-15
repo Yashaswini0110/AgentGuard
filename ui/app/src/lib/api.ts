@@ -110,6 +110,26 @@ export async function patchPolicy(
   })
 }
 
+export interface PolicyPdfUploadResult {
+  created: PolicyRule[]
+  skipped: Array<{ name: string | null; error: string }>
+  message: string
+}
+
+/** Upload a policy/regulation PDF; extracted rules are saved inactive in Supabase. */
+export async function uploadPolicyPdf(file: File, uploadedBy: string): Promise<PolicyPdfUploadResult> {
+  const url = joinUrl(apiBase(), '/admin/policies/pdf')
+  const form = new FormData()
+  form.append('file', file)
+  form.append('uploaded_by', uploadedBy)
+  const res = await fetch(url, { method: 'POST', body: form })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`HTTP ${res.status} ${res.statusText}${text ? ` — ${text}` : ''}`)
+  }
+  return (await res.json()) as PolicyPdfUploadResult
+}
+
 export interface RetrainJobStatus {
   job_id: string | null
   status: 'IDLE' | 'RUNNING' | 'DONE' | 'FAILED'
@@ -160,6 +180,26 @@ export async function postEscalate(decisionId: string, body: { reviewer_id: stri
     method: 'POST',
     body: JSON.stringify(body),
   })
+}
+
+export async function postArtifactHold(
+  decisionId: string,
+  body: { reason: string; held_by: string }
+) {
+  return await httpJson<{ message?: string; artifact?: unknown }>(
+    `/artifacts/${encodeURIComponent(decisionId)}/hold`,
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }
+  )
+}
+
+export async function deleteArtifactHold(decisionId: string) {
+  return await httpJson<{ message?: string; artifact?: unknown }>(
+    `/artifacts/${encodeURIComponent(decisionId)}/hold`,
+    { method: 'DELETE' }
+  )
 }
 
 /** Advisory-only reviewer narrative; grounded in résumé text when available (server-side). */

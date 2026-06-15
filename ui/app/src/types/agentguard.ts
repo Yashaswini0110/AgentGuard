@@ -54,6 +54,10 @@ export interface AgentGuardArtifact {
     note: string
     reviewed_at?: string
   }
+  hold_status?: string | null
+  hold_reason?: string | null
+  held_by?: string | null
+  hold_timestamp?: string | null
   workflow_context?: {
     ingestion_source?: string
     bulk_review_pending?: boolean

@@ -66,11 +66,16 @@ export function dashboardRowStatus(a: AgentGuardArtifact): 'APPROVED' | 'REVIEW'
   return 'APPROVED'
 }
 
+export function isOnHold(a: AgentGuardArtifact) {
+  return String(a.hold_status ?? '').trim().toUpperCase() === 'ON_HOLD'
+}
+
 export function artifactHrRowStatus(
   a: AgentGuardArtifact
 ):
   | 'BLOCKED'
   | 'UNDER REVIEW'
+  | 'ON HOLD'
   | 'APPROVED (HR Override)'
   | 'ESCALATED'
   | 'REJECTED'
@@ -78,6 +83,7 @@ export function artifactHrRowStatus(
   if (a.tech_review?.decision === 'ACCEPT') return 'TECH_RESOLVED'
   if (a.human_review?.action === 'APPROVE') return 'APPROVED (HR Override)'
   if (a.human_review?.action === 'REJECT') return 'REJECTED'
+  if (isOnHold(a)) return 'ON HOLD'
   if (a.escalation) return 'ESCALATED'
   if (a.policy_result === 'BLOCK' || a.routing_classification === 'RED') return 'BLOCKED'
   return 'UNDER REVIEW'
@@ -87,6 +93,7 @@ export function isReviewQueueArtifact(a: AgentGuardArtifact) {
   const bulkPending = a.workflow_context?.bulk_review_pending === true
   return (
     bulkPending ||
+    isOnHold(a) ||
     a.policy_result === 'BLOCK' ||
     a.routing_classification === 'RED' ||
     a.routing_classification === 'YELLOW' ||
@@ -97,6 +104,7 @@ export function isReviewQueueArtifact(a: AgentGuardArtifact) {
 }
 
 export function isShortlisted(a: AgentGuardArtifact) {
+  if (isOnHold(a)) return false
   if (a.human_review?.action === 'APPROVE') return true
   if (a.tech_review?.decision === 'ACCEPT') return true
   const supervisorVerdict = (a.supervisor_review as any)?.supervisor_verdict

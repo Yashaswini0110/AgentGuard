@@ -3,11 +3,12 @@ import { useSearchParams } from 'react-router'
 import AppShell from '@/components/AppShell'
 import { StatusDot } from '@/components/StatusDot'
 import { ResumeViewer } from '@/components/ResumeViewer'
-import { apiBase, fetchRecentArtifacts, postEscalate, postHumanReview } from '@/lib/api'
+import { apiBase, deleteArtifactHold, fetchRecentArtifacts, postArtifactHold, postEscalate, postHumanReview } from '@/lib/api'
 import {
   artifactHrRowStatus,
   formatArtifactTime,
   formatRejectionEmailStatus,
+  isOnHold,
   isReviewQueueArtifact,
   modelVersionLabel,
   shapPairs,
@@ -21,6 +22,7 @@ import TechReviewerSummaryPanel from '@/components/TechReviewerSummaryPanel'
 type ReviewStatus =
   | 'BLOCKED'
   | 'UNDER REVIEW'
+  | 'ON HOLD'
   | 'APPROVED (HR Override)'
   | 'ESCALATED'
   | 'REJECTED'
@@ -58,6 +60,7 @@ function mapArtifact(a: AgentGuardArtifact): ReviewRow | null {
   const statusMap: Record<string, ReviewStatus> = {
     BLOCKED: 'BLOCKED',
     'UNDER REVIEW': 'UNDER REVIEW',
+    'ON HOLD': 'ON HOLD',
     'APPROVED (HR Override)': 'APPROVED (HR Override)',
     ESCALATED: 'ESCALATED',
     REJECTED: 'REJECTED',
@@ -160,6 +163,8 @@ function statusToDot(status: ReviewStatus): { color: 'green' | 'amber' | 'red' |
       return { color: 'red', text: status }
     case 'UNDER REVIEW':
       return { color: 'amber', text: status }
+    case 'ON HOLD':
+      return { color: 'purple', text: status }
     default:
       return { color: 'amber', text: status }
   }
@@ -179,7 +184,7 @@ export default function ReviewQueuePage() {
   const [activeTab, setActiveTab] = useState<'all' | 'blocked' | 'review'>('all')
   const [actionState, setActionState] = useState<{
     id: string
-    type: 'approve' | 'escalate' | 'reject'
+    type: 'approve' | 'escalate' | 'reject' | 'hold' | 'release'
     note: string
   } | null>(null)
   const [resumeViewer, setResumeViewer] = useState<{ decisionId: string; candidate: string } | null>(null)
@@ -211,14 +216,21 @@ export default function ReviewQueuePage() {
     if (activeTab === 'all') return true
     if (activeTab === 'blocked') return r.status === 'BLOCKED'
     if (activeTab === 'review')
-      return r.status === 'UNDER REVIEW' || r.status === 'ESCALATED' || r.routingClass === 'YELLOW'
+      return (
+        r.status === 'UNDER REVIEW' ||
+        r.status === 'ESCALATED' ||
+        r.status === 'ON HOLD' ||
+        r.routingClass === 'YELLOW'
+      )
     return true
   })
 
   const counts = {
     all: scopeRows.length,
     blocked: scopeRows.filter((r) => r.status === 'BLOCKED').length,
-    review: scopeRows.filter((r) => r.status === 'UNDER REVIEW' || r.status === 'ESCALATED').length,
+    review: scopeRows.filter(
+      (r) => r.status === 'UNDER REVIEW' || r.status === 'ESCALATED' || r.status === 'ON HOLD'
+    ).length,
   }
 
   const isDone = (s: ReviewStatus) =>
@@ -250,6 +262,15 @@ export default function ReviewQueuePage() {
         if (emailNote) setActionNotice(emailNote)
       } else if (actionState.type === 'escalate') {
         await postEscalate(row.decisionId, { reviewer_id: reviewerId, note })
+      } else if (actionState.type === 'hold') {
+        await postArtifactHold(row.decisionId, {
+          reason: note || 'Placed on hold pending further review.',
+          held_by: reviewerId,
+        })
+        setActionNotice('Candidate placed on hold — approve, reject, and escalate are paused until release.')
+      } else if (actionState.type === 'release') {
+        await deleteArtifactHold(row.decisionId)
+        setActionNotice('Hold released — candidate is back under active review.')
       }
       await reload()
     } catch (e) {
@@ -367,6 +388,7 @@ export default function ReviewQueuePage() {
             )}
             {filteredRows.map((row) => {
               const done = isDone(row.status)
+              const onHold = isOnHold(row.artifact)
               const expanded = expandedId === row.id
               const dot = statusToDot(row.status)
               const isBusy = busyId === row.id
@@ -399,7 +421,9 @@ export default function ReviewQueuePage() {
                       <StatusDot color={dot.color} label={dot.text} />
                     </td>
                     <td className="px-5 py-3 font-mono text-xs" style={{ color: done ? '#9B9B9B' : '#0D0D0D' }}>
-                      {row.violation}
+                      {onHold && row.artifact.hold_reason
+                        ? `HOLD · ${row.artifact.hold_reason}`
+                        : row.violation}
                     </td>
                     <td className="px-5 py-3">
                       {!done && (
@@ -551,6 +575,89 @@ export default function ReviewQueuePage() {
                               </div>
                             </>
                           )}
+                          {actionState.type === 'hold' && (
+                            <>
+                              <p className="font-sans text-xs mb-2" style={{ color: '#0D0D0D' }}>
+                                Place <strong>{row.candidate}</strong> on hold? Approve, reject, and escalate stay
+                                disabled until you release the hold (
+                                <span className="font-mono">POST /artifacts/…/hold</span>).
+                              </p>
+                              <textarea
+                                className="w-full mb-2 font-sans text-xs p-2 rounded-md"
+                                style={{ border: '1px solid #E4E2DC', backgroundColor: '#FFFFFF', resize: 'none' }}
+                                rows={2}
+                                value={actionState.note}
+                                onChange={(e) => setActionState({ ...actionState, note: e.target.value })}
+                                placeholder="Reason for hold (e.g. pending legal review)…"
+                              />
+                              <div className="flex gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => void handleConfirmAction()}
+                                  disabled={isBusy}
+                                  className="font-sans text-xs font-medium px-3 py-1.5 rounded-md"
+                                  style={{
+                                    backgroundColor: '#7C3AED',
+                                    color: '#FFFFFF',
+                                    border: 'none',
+                                    cursor: isBusy ? 'wait' : 'pointer',
+                                  }}
+                                >
+                                  {isBusy ? 'Saving…' : 'Confirm Hold'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setActionState(null)}
+                                  className="font-sans text-xs font-medium px-3 py-1.5 rounded-md"
+                                  style={{
+                                    border: '1px solid #E4E2DC',
+                                    color: '#0D0D0D',
+                                    background: 'none',
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </>
+                          )}
+                          {actionState.type === 'release' && (
+                            <>
+                              <p className="font-sans text-xs mb-2" style={{ color: '#0D0D0D' }}>
+                                Release hold on <strong>{row.candidate}</strong>? They return to active review (
+                                <span className="font-mono">DELETE /artifacts/…/hold</span>).
+                              </p>
+                              <div className="flex gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => void handleConfirmAction()}
+                                  disabled={isBusy}
+                                  className="font-sans text-xs font-medium px-3 py-1.5 rounded-md"
+                                  style={{
+                                    backgroundColor: '#0D6EFD',
+                                    color: '#FFFFFF',
+                                    border: 'none',
+                                    cursor: isBusy ? 'wait' : 'pointer',
+                                  }}
+                                >
+                                  {isBusy ? 'Saving…' : 'Release Hold'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setActionState(null)}
+                                  className="font-sans text-xs font-medium px-3 py-1.5 rounded-md"
+                                  style={{
+                                    border: '1px solid #E4E2DC',
+                                    color: '#0D0D0D',
+                                    background: 'none',
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </>
+                          )}
                         </div>
                       ) : !done ? (
                         <div className="flex gap-2 flex-wrap">
@@ -565,39 +672,66 @@ export default function ReviewQueuePage() {
                           >
                             View Resume
                           </button>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setActionState({ id: row.id, type: 'approve', note: '' })
-                            }}
-                            className="font-sans text-xs font-medium px-2 py-1 rounded"
-                            style={{ border: '1px solid #15803D', color: '#15803D', background: 'none', cursor: 'pointer' }}
-                          >
-                            Approve Override
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setActionState({ id: row.id, type: 'escalate', note: '' })
-                            }}
-                            className="font-sans text-xs font-medium px-2 py-1 rounded"
-                            style={{ border: '1px solid #0D6EFD', color: '#0D6EFD', background: 'none', cursor: 'pointer' }}
-                          >
-                            Escalate
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setActionState({ id: row.id, type: 'reject', note: '' })
-                            }}
-                            className="font-sans text-xs font-medium px-2 py-1 rounded"
-                            style={{ border: '1px solid #B91C1C', color: '#B91C1C', background: 'none', cursor: 'pointer' }}
-                          >
-                            Reject
-                          </button>
+                          {onHold ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setActionState({ id: row.id, type: 'release', note: '' })
+                              }}
+                              className="font-sans text-xs font-medium px-2 py-1 rounded"
+                              style={{ border: '1px solid #0D6EFD', color: '#0D6EFD', background: 'none', cursor: 'pointer' }}
+                            >
+                              Release Hold
+                            </button>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setActionState({ id: row.id, type: 'approve', note: '' })
+                                }}
+                                className="font-sans text-xs font-medium px-2 py-1 rounded"
+                                style={{ border: '1px solid #15803D', color: '#15803D', background: 'none', cursor: 'pointer' }}
+                              >
+                                Approve Override
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setActionState({ id: row.id, type: 'escalate', note: '' })
+                                }}
+                                className="font-sans text-xs font-medium px-2 py-1 rounded"
+                                style={{ border: '1px solid #0D6EFD', color: '#0D6EFD', background: 'none', cursor: 'pointer' }}
+                              >
+                                Escalate
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setActionState({ id: row.id, type: 'reject', note: '' })
+                                }}
+                                className="font-sans text-xs font-medium px-2 py-1 rounded"
+                                style={{ border: '1px solid #B91C1C', color: '#B91C1C', background: 'none', cursor: 'pointer' }}
+                              >
+                                Reject
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setActionState({ id: row.id, type: 'hold', note: '' })
+                                }}
+                                className="font-sans text-xs font-medium px-2 py-1 rounded"
+                                style={{ border: '1px solid #7C3AED', color: '#7C3AED', background: 'none', cursor: 'pointer' }}
+                              >
+                                Hold
+                              </button>
+                            </>
+                          )}
                         </div>
                       ) : null}
                     </td>
@@ -629,6 +763,16 @@ export default function ReviewQueuePage() {
                                     ? [{ key: 'servicenow_ticket', value: row.servicenowTicket }]
                                     : []),
                                   { key: 'model_version', value: row.modelVersion },
+                                  ...(onHold
+                                    ? [
+                                        { key: 'hold_reason', value: row.artifact.hold_reason ?? '—' },
+                                        { key: 'held_by', value: row.artifact.held_by ?? '—' },
+                                        {
+                                          key: 'hold_timestamp',
+                                          value: formatArtifactTime(row.artifact.hold_timestamp),
+                                        },
+                                      ]
+                                    : []),
                                 ].map((item, idx, arr) => (
                                   <div
                                     key={item.key}

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
-import { fetchPolicies, patchPolicy } from '@/lib/api'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { fetchPolicies, patchPolicy, uploadPolicyPdf } from '@/lib/api'
 import type { PolicyRule } from '@/lib/api'
 import { useDemoAuth } from '@/contexts/DemoAuthContext'
 
@@ -36,6 +36,10 @@ export default function PolicyTable() {
   const [error, setError] = useState<string | null>(null)
   const [toggling, setToggling] = useState<Set<string>>(new Set())
   const [toast, setToast] = useState<{ id: string; msg: string; ok: boolean } | null>(null)
+  const [pdfFile, setPdfFile] = useState<File | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const [uploadNote, setUploadNote] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -59,6 +63,38 @@ export default function PolicyTable() {
     const id = String(Date.now())
     setToast({ id, msg, ok })
     setTimeout(() => setToast((t) => (t?.id === id ? null : t)), 3500)
+  }
+
+  const handlePdfUpload = async () => {
+    if (!pdfFile) return
+    setUploading(true)
+    setUploadNote(null)
+    try {
+      const result = await uploadPolicyPdf(pdfFile, user?.id ?? 'ADMIN-01')
+      const skipped = result.skipped?.length ?? 0
+      const created = result.created?.length ?? 0
+      showToast(
+        created > 0
+          ? `${created} rule${created !== 1 ? 's' : ''} extracted and saved (inactive). Activate after review.`
+          : result.message || 'No rules were extracted from this PDF.',
+        created > 0
+      )
+      if (skipped > 0) {
+        const detail = result.skipped
+          .map((s) => `${s.name ?? 'unknown'}: ${s.error}`)
+          .join('; ')
+        setUploadNote(`${skipped} candidate rule${skipped !== 1 ? 's' : ''} skipped — ${detail}`)
+      }
+      setPdfFile(null)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+      await load()
+    } catch (e) {
+      const raw = e instanceof Error ? e.message : 'Upload failed'
+      const clean = raw.replace(/\s*—\s*\{.*\}$/, '')
+      showToast(`PDF upload failed: ${clean}`, false)
+    } finally {
+      setUploading(false)
+    }
   }
 
   const handleToggle = async (policy: PolicyRule) => {
@@ -106,6 +142,50 @@ export default function PolicyTable() {
           {toast.msg}
         </div>
       )}
+
+      <div
+        className="mb-5 p-4 rounded-lg"
+        style={{ border: '1px dashed #E4E2DC', backgroundColor: '#FAFAF8' }}
+      >
+        <p className="font-sans text-sm font-medium mb-1" style={{ color: '#0D0D0D' }}>
+          Upload policy document (PDF)
+        </p>
+        <p className="font-sans text-xs mb-3" style={{ color: '#9B9B9B' }}>
+          Rules are extracted from the document and saved to Supabase as inactive entries
+          (source: pdf). Review and activate each rule before it enforces.
+        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/pdf,.pdf"
+            disabled={uploading}
+            onChange={(e) => setPdfFile(e.target.files?.[0] ?? null)}
+            className="font-sans text-sm"
+            style={{ color: '#6B6B6B', maxWidth: '100%' }}
+          />
+          <button
+            type="button"
+            disabled={!pdfFile || uploading}
+            onClick={() => void handlePdfUpload()}
+            className="font-sans text-sm px-4 py-1.5 rounded font-medium transition-opacity"
+            style={{
+              backgroundColor: '#0D6EFD',
+              color: '#FFFFFF',
+              border: 'none',
+              cursor: !pdfFile || uploading ? 'not-allowed' : 'pointer',
+              opacity: !pdfFile || uploading ? 0.55 : 1,
+            }}
+          >
+            {uploading ? 'Extracting rules…' : 'Upload & extract'}
+          </button>
+        </div>
+        {uploadNote ? (
+          <p className="font-sans text-xs mt-3" style={{ color: '#B45309' }}>
+            {uploadNote}
+          </p>
+        ) : null}
+      </div>
 
       <div className="flex items-center justify-between mb-4">
         <p className="font-sans text-sm" style={{ color: '#6B6B6B' }}>

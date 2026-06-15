@@ -65,8 +65,9 @@ export default function AdminPage() {
                 Policy Rules
               </h2>
               <p className="font-sans text-xs mt-1" style={{ color: '#9B9B9B' }}>
-                Active rules are enforced by Layer 1 in real time. Toggle takes effect immediately — no restart required.
-                Rules created here land inactive; activate them after review.
+                Upload a regulation or policy PDF to extract enforceable rules into Supabase.
+                Active rules are enforced by Layer 1 in real time — toggles take effect immediately.
+                Extracted rules land inactive; activate them after review.
               </p>
             </div>
             <PolicyTable />
