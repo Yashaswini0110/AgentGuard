@@ -240,7 +240,7 @@ RED decision → ServiceNow REST API → INC0004821 created → Decision PENDING
 | ServiceNow | ServiceNow REST API + Python `requests` |
 | Artifact Engine | Python `hashlib` SHA-256 + `uuid` + `json` |
 | Backend | FastAPI |
-| Frontend | React (Vite) dashboard + legacy Streamlit |
+| Frontend | React (Vite) dashboard |
 | Database | SQLite → PostgreSQL |
 | Infrastructure | Docker + docker-compose |
 

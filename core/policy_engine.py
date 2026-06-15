@@ -69,7 +69,7 @@ POLICY_RULES: dict[str, dict] = {
         "condition": {
             "type": "feature_present",
             "features": ["home_district", "village_code"],
-            "match": "any",
+            "match": "all",
         },
     },
     "PROMPT_INJECTION_DETECTED": {

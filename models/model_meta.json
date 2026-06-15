@@ -1,14 +1,14 @@
 {
-  "baseline_red_rate": 0.2526,
-  "model_version_hash": "e66d87bb040ca2b484569e260f33ad4329a647effdc2935ee34ca8fce06c8b0a",
-  "trained_at": null,
-  "train_accuracy": null,
-  "cv_accuracy": null,
+  "baseline_red_rate": 0.0802,
+  "model_version_hash": "82784c8fc0a46a5ea52da7f0449b2d0cbaf3727bfb0d6942081f0d7821b3b240",
+  "trained_at": "2026-06-15T14:26:54.437949+00:00",
+  "train_accuracy": 0.802,
+  "cv_accuracy": 0.788,
   "n_samples": 5000,
   "label_distribution": {
-    "GREEN": 963,
-    "YELLOW": 2774,
-    "RED": 1263
+    "GREEN": 3747,
+    "YELLOW": 852,
+    "RED": 401
   },
-  "source": "baseline_backfill"
+  "source": "train_router"
 }

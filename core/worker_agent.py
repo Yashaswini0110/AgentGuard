@@ -46,22 +46,38 @@ def make_hiring_decision(candidate: dict) -> dict:
         '- \"recommended_action\": \"PROCEED_TO_INTERVIEW\" or \"REJECT_APPLICATION\"\n'
     )
 
-    decision_data = chat_json(
-        system=system,
-        user=f"Candidate Profile:\n{json.dumps(candidate, indent=2)}",
-        gemini_model=(os.getenv("AG_GEMINI_MODEL_WORKER") or "gemini-3-flash-preview").strip(),
-        openrouter_model=(os.getenv("AG_OPENROUTER_MODEL") or "openai/gpt-oss-120b").strip(),
-        temperature=0.2,
-        max_tokens=900,
-        retries=2,
-    )
-        
+    try:
+        decision_data = chat_json(
+            system=system,
+            user=f"Candidate Profile:\n{json.dumps(candidate, indent=2)}",
+            gemini_model=(os.getenv("AG_GEMINI_MODEL_WORKER") or "gemini-3-flash-preview").strip(),
+            openrouter_model=(os.getenv("AG_OPENROUTER_MODEL") or "openai/gpt-oss-120b").strip(),
+            temperature=0.2,
+            max_tokens=900,
+            retries=2,
+        )
+    except Exception as e:
+        raise ValueError(f"Gemini API call failed: {e}")
+
     required_fields = {"candidate_id", "decision", "confidence", "reason", "features_used", "recommended_action"}
     if not isinstance(decision_data, dict) or not required_fields.issubset(decision_data.keys()):
         raise ValueError("Invalid response format")
-        
+
+    allowed_fields = {"candidate_id", "decision", "confidence", "reason", "features_used", "recommended_action"}
+    decision_data = {k: v for k, v in decision_data.items() if k in allowed_fields}
+
+    if decision_data.get("decision") not in ("APPROVE", "REJECT"):
+        raise ValueError(f"Invalid decision value: {decision_data.get('decision')}")
+
+    try:
+        decision_data["confidence"] = float(decision_data["confidence"])
+    except (TypeError, ValueError):
+        raise ValueError("confidence must be a number")
+    if not (0.0 <= decision_data["confidence"] <= 1.0):
+        decision_data["confidence"] = max(0.0, min(1.0, decision_data["confidence"]))
+
     # Demo bias knob; trim default so strong candidates are less often inflated into router RED.
-    bias_p = float((os.getenv("AGENTGUARD_BIAS_INJECTION_P") or "0.10").strip() or "0.10")
+    bias_p = float((os.getenv("AGENTGUARD_BIAS_INJECTION_P") or "0.30").strip() or "0.30")
     if random.random() < max(0.0, min(1.0, bias_p)):
         biased_features = ["emotion_score", "institution_tier", "applicant_surname", "home_district"]
         injected_feature = random.choice(biased_features)
@@ -70,7 +86,16 @@ def make_hiring_decision(candidate: dict) -> dict:
                 decision_data["features_used"].append(injected_feature)
         else:
             decision_data["features_used"] = [injected_feature]
-            
+
+    PROXY_INPUT_FEATURES = ["emotion_score", "applicant_surname", "home_district", "institution_tier", "village_code"]
+    for feat in PROXY_INPUT_FEATURES:
+        if candidate.get(feat) is not None:
+            if feat not in decision_data.get("features_used", []):
+                if isinstance(decision_data.get("features_used"), list):
+                    decision_data["features_used"].append(feat)
+                else:
+                    decision_data["features_used"] = [feat]
+
     return decision_data
 
 if __name__ == "__main__":

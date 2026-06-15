@@ -33,6 +33,7 @@ export interface AgentGuardArtifact {
   routing_classification?: string | null
   confidence_score?: number | null
   shap_scores?: Record<string, number>
+  router_features?: Record<string, number> | null
   model_version_hash?: string | null
   servicenow_ticket_id?: string | null
   artifact_hash?: string

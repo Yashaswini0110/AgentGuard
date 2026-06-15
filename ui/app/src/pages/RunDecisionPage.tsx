@@ -177,7 +177,7 @@ export default function RunDecisionPage() {
                 Candidate ingestion
               </div>
               <div className="font-sans text-xs mt-0.5" style={{ color: '#6B6B6B' }}>
-                Streamlit feature parity: manual input or resume upload (JD-aware)
+                Manual input or résumé upload with JD-aware parsing
               </div>
             </div>
             <div className="flex gap-2">

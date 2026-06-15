@@ -18,6 +18,7 @@ import {
 import type { AgentGuardArtifact } from '@/types/agentguard'
 import { useDemoAuth } from '@/contexts/DemoAuthContext'
 import TechReviewerSummaryPanel from '@/components/TechReviewerSummaryPanel'
+import ShapExplainabilityPanel from '@/components/ShapExplainabilityPanel'
 
 type ReviewStatus =
   | 'BLOCKED'
@@ -46,7 +47,7 @@ interface ReviewRow {
   artifactHash: string
   servicenowTicket?: string
   modelVersion: string
-  shapData: { feature: string; value: number }[]
+  shapData: { feature: string; label: string; value: number }[]
 }
 
 function mapArtifact(a: AgentGuardArtifact): ReviewRow | null {
@@ -75,7 +76,7 @@ function mapArtifact(a: AgentGuardArtifact): ReviewRow | null {
     role: bulk ? 'Bulk ZIP pool' : 'Applicant',
     status: statusMap[st] ?? 'UNDER REVIEW',
     violation: violationLabel(a),
-    shapFeature: top.feature,
+    shapFeature: top.label,
     shapValue: top.value,
     submitted: formatArtifactTime(a.timestamp),
     decisionId: a.decision_id,
@@ -824,24 +825,16 @@ export default function ReviewQueuePage() {
                                   Download artifact JSON
                                 </button>
                                 <span className="font-sans text-xs" style={{ color: '#9B9B9B' }}>
-                                  Streamlit parity: “Download Regulatory Export” (client-side)
+                                  Download signed compliance artifact (client-side)
                                 </span>
                               </div>
                             </div>
                             <div className="flex-1">
-                              <h4 className="font-sans font-medium text-[13px] mb-3" style={{ color: '#0D0D0D' }}>
-                                SHAP Feature Attribution
-                              </h4>
-                              <div className="flex flex-col gap-2">
-                                {row.shapData.map((s) => (
-                                  <div key={s.feature} className="flex items-center justify-between">
-                                    <span className="font-mono text-[11px]" style={{ color: '#6B6B6B', width: '140px' }}>
-                                      {s.feature}
-                                    </span>
-                                    <ShapBar value={s.value} />
-                                  </div>
-                                ))}
-                              </div>
+                              <ShapExplainabilityPanel
+                                shapScores={row.artifact.shap_scores}
+                                routerFeatures={row.artifact.router_features}
+                                riskLevel={row.routingClass}
+                              />
                             </div>
                           </div>
                         </div>

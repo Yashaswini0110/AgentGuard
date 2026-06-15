@@ -15,6 +15,7 @@ import {
 import type { AgentGuardArtifact } from '@/types/agentguard'
 import { useDemoAuth } from '@/contexts/DemoAuthContext'
 import TechReviewerSummaryPanel from '@/components/TechReviewerSummaryPanel'
+import ShapExplainabilityPanel from '@/components/ShapExplainabilityPanel'
 
 interface TechCase {
   id: string
@@ -27,7 +28,7 @@ interface TechCase {
   servicenowTicket?: string
   hrNote: string
   escalatedTime: string
-  shapData: { feature: string; value: number }[]
+  shapData: { feature: string; label: string; value: number }[]
   decisionId: string
   candidateId: string
   artifactHash: string
@@ -57,49 +58,6 @@ function mapEscalated(a: AgentGuardArtifact): TechCase | null {
     artifactHash: shortHash(a.artifact_hash, 10, 4),
     modelVersion: modelVersionLabel(a),
   }
-}
-
-function ShapBar({ value }: { value: number }) {
-  const maxVal = 0.5
-  const pct = Math.min(Math.abs(value) / maxVal, 1) * 100
-  const isPositive = value >= 0
-
-  return (
-    <div className="flex items-center gap-2">
-      <div
-        className="relative flex-shrink-0"
-        style={{ width: '120px', height: '4px', backgroundColor: '#E4E2DC' }}
-      >
-        <div
-          style={{
-            position: 'absolute',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            width: '1px',
-            height: '8px',
-            backgroundColor: '#9B9B9B',
-            top: '-2px',
-            zIndex: 2,
-          }}
-        />
-        <div
-          style={{
-            position: 'absolute',
-            left: isPositive ? '50%' : `${50 - pct / 2}%`,
-            width: `${pct / 2}%`,
-            height: '4px',
-            backgroundColor: isPositive ? '#B91C1C' : '#15803D',
-            top: 0,
-            zIndex: 1,
-          }}
-        />
-      </div>
-      <span className="font-mono text-[11px] flex-shrink-0" style={{ color: '#6B6B6B', minWidth: '40px' }}>
-        {value > 0 ? '+' : ''}
-        {value.toFixed(2)}
-      </span>
-    </div>
-  )
 }
 
 export default function TechReviewPage() {
@@ -303,29 +261,12 @@ export default function TechReviewPage() {
                 </div>
 
                 <div style={{ width: '40%' }}>
-                  <h4 className="font-sans font-medium text-[13px] mb-3" style={{ color: '#0D0D0D' }}>
-                    Feature risk attribution
-                  </h4>
-                  <div className="flex flex-col gap-2">
-                    {c.shapData.map((s) => (
-                      <div key={s.feature} className="flex items-center justify-between gap-2">
-                        <span
-                          className="font-mono text-[11px] flex-shrink-0"
-                          style={{
-                            color: '#6B6B6B',
-                            width: '130px',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                          }}
-                          title={s.feature}
-                        >
-                          {s.feature}
-                        </span>
-                        <ShapBar value={s.value} />
-                      </div>
-                    ))}
-                  </div>
+                  <ShapExplainabilityPanel
+                    shapScores={c.artifact.shap_scores}
+                    routerFeatures={c.artifact.router_features}
+                    riskLevel={c.routingClass}
+                    title="Feature risk attribution"
+                  />
                 </div>
               </div>
 
